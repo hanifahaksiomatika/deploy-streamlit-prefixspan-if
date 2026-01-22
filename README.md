@@ -1,7 +1,7 @@
 # Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif  
 **PrefixSpan (Sequential Pattern Mining) + Isolation Forest (Anomaly Detection)**
 
-🚀 **Live App (Streamlit):** https://deploy-app-prefixspan-if.streamlit.app/
+**App (Streamlit):** https://deploy-app-prefixspan-if.streamlit.app/
 
 Aplikasi ini merupakan implementasi *deployment* dari penelitian skripsi untuk:
 1) mengekstraksi **pola sekuensial pembelian** menggunakan **PrefixSpan**, dan  
