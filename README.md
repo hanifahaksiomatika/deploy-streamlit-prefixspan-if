@@ -1,66 +1,49 @@
-# Streamlit Deployment — PrefixSpan + Isolation Forest
+# Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif  
+**PrefixSpan (Sequential Pattern Mining) + Isolation Forest (Anomaly Detection)**
 
-Ini project siap jalan di VS Code (lokal) buat deployment hasil riset kamu.
+🚀 **Live App (Streamlit):** https://deploy-app-prefixspan-if.streamlit.app/
 
-## 1) Struktur folder
+Aplikasi ini merupakan implementasi *deployment* dari penelitian skripsi untuk:
+1) mengekstraksi **pola sekuensial pembelian** menggunakan **PrefixSpan**, dan  
+2) mendeteksi **pelanggan impulsif** menggunakan **Isolation Forest** dengan **skor anomali**.
 
-- `app.py` → Streamlit UI
-- `src/preprocess.py` → cleaning + (opsional) segmentasi Gen Z + pembentukan sequence + fitur customer-level
-- `src/mining.py` → PrefixSpan (pola sekuensial)
-- `src/anomaly.py` → Isolation Forest (deteksi impulsif)
-- `requirements.txt` → dependency
+---
 
-## 2) Format CSV yang diharapkan
+## Fitur Utama
+- **Upload CSV transaksi** (tanpa perlu database)
+- **(Opsional) Segmentasi Gen Z** melalui filter usia
+- **(Opsional) Filter tahun transaksi** (atau gunakan semua tahun)
+- Output:
+  - **Pola sekuensial (PrefixSpan)**: urutan kategori yang sering muncul beserta support
+  - **Deteksi pelanggan impulsif (Isolation Forest)**: daftar customer dengan label anomali dan skor anomalinya
+- **Download hasil** ke CSV untuk lampiran/analisis lanjutan
 
-Minimal kolom ini (case-sensitive):
+---
 
-- `customer_id`
-- `order_id`
-- `order_date` (format bebas, akan diparse `pd.to_datetime`)
-- `category`
-- `total_amount`
-- `quantity`
-- `discount`
-- `customer_age`
+## Alur Sistem
+1. Input data transaksi (CSV)  
+2. Pembersihan data + validasi kolom  
+3. (Opsional) Filter Gen Z  
+4. Pembentukan *sequence* per pelanggan berdasarkan urutan transaksi  
+5. Ekstraksi pola sekuensial dengan PrefixSpan  
+6. Agregasi fitur perilaku pembelian per pelanggan  
+7. Deteksi impulsif menggunakan Isolation Forest → skor anomali  
+8. Output ditampilkan pada dashboard + file hasil dapat diunduh
 
-Kolom lain boleh ada — akan diabaikan.
+---
 
+## Format Data (CSV)
+Minimal kolom yang dibutuhkan:
 
-> Bonus: app juga coba **auto-rename** beberapa nama kolom umum (mis. `order_total` → `total_amount`). Kalau belum kena, tinggal rename manual.
+| Kolom | Deskripsi |
+|------|-----------|
+| `customer_id` | ID pelanggan |
+| `order_id` | ID transaksi/order |
+| `order_date` | tanggal transaksi (disarankan format `YYYY-MM-DD`) |
+| `category` | kategori produk |
+| `total_amount` | total belanja per transaksi |
+| `quantity` | jumlah item |
+| `discount` | nilai diskon (0 jika tidak ada) |
+| `customer_age` | usia pelanggan (angka) |
 
-## 3) Cara run di VS Code (lokal)
-
-```bash
-# (opsional) bikin virtual env
-python -m venv .venv
-
-# activate
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-Nanti otomatis kebuka di browser.
-
-## 4) Output aplikasi
-
-- **PrefixSpan**: tabel pola sekuensial + support
-- **Impulsif (IF)**: list customer impulsif + `anom_score` (makin besar = makin anomali)
-- **Normal vs Impulsif**: perbandingan pola sekuensial antara dua kelompok
-
-## 5) Catatan penting
-
-- Default aplikasi = **semua usia**.
-- Kamu bisa nyalain **segmentasi Gen Z** lewat checkbox di sidebar.
-- Definisi Gen Z dihitung dari perkiraan tahun lahir: `order_year - customer_age` berada di **1997–2012**.
-  Ini ekuivalen dengan rentang umur per tahun di notebook (2023/2024/2025).
-- Kalau pola impulsif terlalu sedikit → turunin `minimum support` atau naikin `max panjang sequence`.
-
-
-## Filter Tahun Transaksi
-- Default: semua tahun transaksi (tidak dibatasi).
-- Kamu bisa nonaktifkan opsi "Gunakan semua tahun transaksi" lalu pilih tahun tertentu di sidebar.
+> **Catatan:** jika nama kolom di dataset kamu berbeda, silakan samakan/rename ke format di atas agar aplikasi bisa memproses dengan benar.
