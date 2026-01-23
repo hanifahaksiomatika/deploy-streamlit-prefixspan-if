@@ -1,3 +1,5 @@
+Link Streamlit: https://deploy-app-prefixspan-if.streamlit.app/
+
 # Streamlit Deployment — PrefixSpan + Isolation Forest (Range Filter)
 
 Aplikasi Streamlit untuk:
@@ -16,8 +18,6 @@ conda activate skripsi_streamlit
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
-Buka: http://localhost:8501
 
 ## Kolom CSV Minimal
 - customer_id
