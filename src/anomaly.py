@@ -1,48 +1,66 @@
-from __future__ import annotations
-
-import pandas as pd
+import time
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 
-def fit_isolation_forest(
-    X: pd.DataFrame,
+FEATURES = ["jml_order","total_spend","avg_order","std_order","avg_items","discount_rate","avg_gap_days"]
+
+def run_isolation_forest(
+    cust_feat: pd.DataFrame,
     contamination: float = 0.05,
     n_estimators: int = 100,
+    score_percentile: int = 95,
     random_state: int = 42,
 ):
     """
-    Fit scaler + IsolationForest on customer-level features.
-    Returns fitted (model, scaler).
+    Mengikuti notebook:
+    - scaling -> fit IF
+    - score = -score_samples (lebih besar = lebih anomali)
+    - label_if = predict (1 normal, -1 anomali)
+    - status: Impulsif jika label_if == -1
+    Tambahan: threshold berdasarkan persentil skor untuk info ringkas.
     """
+    t0 = time.time()
+    df = cust_feat.copy()
+
+    # ensure all features exist
+    for f in FEATURES:
+        if f not in df.columns:
+            df[f] = 0
+
+    X = df[FEATURES].copy()
+    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    model = IsolationForest(
-        n_estimators=n_estimators,
-        contamination=contamination,
-        random_state=random_state
+    if_model = IsolationForest(
+        n_estimators=int(n_estimators),
+        contamination=float(contamination),
+        random_state=int(random_state)
     )
-    model.fit(X_scaled)
-    return model, scaler
+    if_model.fit(X_scaled)
 
-def score_isolation_forest(
-    cust_feat: pd.DataFrame,
-    feature_cols: list[str],
-    model: IsolationForest,
-    scaler: StandardScaler,
-) -> pd.DataFrame:
-    """
-    Score customers:
-    - label_if: 1 normal, -1 anomaly
-    - anom_score: larger = more anomalous (defined as -score_samples like notebook)
-    """
-    X_scaled = scaler.transform(cust_feat[feature_cols])
-    label = model.predict(X_scaled)
-    score = -model.score_samples(X_scaled)
+    label = if_model.predict(X_scaled)
+    score = -if_model.score_samples(X_scaled)
 
-    out = cust_feat.copy()
-    out["label_if"] = label
-    out["anom_score"] = score
-    out["status"] = np.where(out["label_if"] == -1, "Impulsif (Anomali)", "Normal")
-    return out
+    hasil = df[["customer_id"] + FEATURES].copy()
+    hasil["label_if"] = label
+    hasil["anom_score"] = score
+    hasil["status"] = np.where(hasil["label_if"] == -1, "Impulsif", "Normal")
+
+    # Info summary
+    threshold = float(np.percentile(score, int(score_percentile))) if len(score) else 0.0
+    runtime = time.time() - t0
+
+    info = pd.DataFrame([{
+        "Total customer": int(hasil.shape[0]),
+        "Normal (label IF = 1)": int((hasil["status"] == "Normal").sum()),
+        "Impulsif (label IF = -1)": int((hasil["status"] == "Impulsif").sum()),
+        "Threshold persentil skor": int(score_percentile),
+        "Nilai threshold": round(threshold, 6),
+        "Runtime IF (detik)": round(runtime, 4)
+    }])
+
+    return hasil.sort_values("anom_score", ascending=False).reset_index(drop=True), info

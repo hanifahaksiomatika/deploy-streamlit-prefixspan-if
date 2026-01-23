@@ -1,41 +1,44 @@
-from __future__ import annotations
-
-import math
 import time
+import math
 import pandas as pd
 from prefixspan import PrefixSpan
 
-def run_prefixspan(seqs: list[list], min_support_ratio: float):
+def run_prefixspan(sequences, min_support_ratio: float = 0.008, min_len: int = 2):
     """
-    Ported from your notebook.
-    Returns:
-      info_df: 1-row DataFrame about runtime/support
-      patterns_df: frequent patterns with support + pretty string
+    Jalankan PrefixSpan seperti notebook:
+    - min_support_ratio -> min_count = ceil(ratio * N)
+    - output DataFrame pola dengan support_count, support_ratio, length, pattern_str
     """
-    if not seqs:
+    t0 = time.time()
+    sequences = [s for s in sequences if isinstance(s, list) and len(s) > 0]
+    N = len(sequences)
+    if N == 0:
         info = pd.DataFrame([{
             "Support (ratio)": min_support_ratio,
             "Min support (count)": 0,
             "Jumlah pola": 0,
             "Waktu (detik)": 0.0
         }])
-        return info, pd.DataFrame(columns=["support_count","pattern","support_ratio","length","pattern_str"])
+        return info, pd.DataFrame(columns=["support_count", "pattern", "support_ratio", "length", "pattern_str"])
 
-    N = len(seqs)
-    min_count = math.ceil(min_support_ratio * N)
+    min_count = max(1, int(math.ceil(min_support_ratio * N)))
 
-    ps = PrefixSpan(seqs)
-
-    t0 = time.perf_counter()
-    patterns = ps.frequent(min_count)  # list[tuple[support_count, pattern_list]]
-    t1 = time.perf_counter()
-
+    ps = PrefixSpan(sequences)
+    # PrefixSpan in this library returns list of (support, pattern)
+    patterns = ps.frequent(min_count)
     df_pat = pd.DataFrame(patterns, columns=["support_count", "pattern"])
-    df_pat["support_ratio"] = df_pat["support_count"] / N
-    df_pat["length"] = df_pat["pattern"].apply(len)
-    df_pat["pattern_str"] = df_pat["pattern"].apply(lambda x: " → ".join(map(str, x)))
-    df_pat = df_pat.sort_values(["support_count","pattern_str"], ascending=[False, True]).reset_index(drop=True)
 
+    if df_pat.empty:
+        df_pat = pd.DataFrame(columns=["support_count", "pattern"])
+
+    df_pat["support_ratio"] = df_pat["support_count"] / N
+    df_pat["length"] = df_pat["pattern"].apply(lambda x: len(x) if isinstance(x, (list, tuple)) else 0)
+    df_pat = df_pat[df_pat["length"] >= int(min_len)].copy()
+
+    df_pat["pattern_str"] = df_pat["pattern"].apply(lambda x: " → ".join(map(str, x)))
+    df_pat = df_pat.sort_values(["support_count", "pattern_str"], ascending=[False, True]).reset_index(drop=True)
+
+    t1 = time.time()
     info = pd.DataFrame([{
         "Support (ratio)": float(min_support_ratio),
         "Min support (count)": int(min_count),
@@ -44,11 +47,3 @@ def run_prefixspan(seqs: list[list], min_support_ratio: float):
     }])
 
     return info, df_pat
-
-def mine_patterns_table(df_pat: pd.DataFrame, min_len: int = 2) -> pd.DataFrame:
-    if df_pat.empty:
-        return pd.DataFrame(columns=["Pola Pembelian","support_count","support_ratio","length"])
-
-    out = df_pat[df_pat["length"] >= min_len].copy()
-    out = out.rename(columns={"pattern_str": "Pola Pembelian"})
-    return out[["Pola Pembelian","support_count","support_ratio","length"]]

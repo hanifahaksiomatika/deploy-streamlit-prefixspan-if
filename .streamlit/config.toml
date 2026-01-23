@@ -3,6 +3,5 @@ base="light"
 
 [server]
 headless=true
-
-[browser]
-gatherUsageStats=false
+enableCORS=false
+enableXsrfProtection=false
