@@ -7,22 +7,63 @@ from src.preprocess import clean_and_prepare, build_sequences, build_order_table
 from src.mining import run_prefixspan
 from src.anomaly import run_isolation_forest
 
-# Interpretasi otomatis (PrefixSpan & Isolation Forest)
+# Interpretasi (PrefixSpan & Isolation Forest)
 
 def _pattern_to_list(pat):
-    """Pattern bisa list/tuple, atau string 'A -> B', atau string repr list."""
+    """Pattern bisa list/tuple, atau string 'A -> B', atau string 'A → B', atau repr list."""
     if isinstance(pat, (list, tuple)):
-        return list(pat)
+        return [str(x) for x in pat]
+
     if isinstance(pat, str):
-        if "->" in pat:
-            return [x.strip() for x in pat.split("->")]
+        s = pat.strip()
+
+        if "→" in s:
+            return [x.strip() for x in s.split("→") if x.strip()]
+        if "->" in s:
+            return [x.strip() for x in s.split("->") if x.strip()]
+
+        # "['A','B']" atau "('A','B')"
         try:
-            v = ast.literal_eval(pat)
+            v = ast.literal_eval(s)
             if isinstance(v, (list, tuple)):
-                return list(v)
+                return [str(x) for x in v]
         except Exception:
-            return [pat]
+            pass
+
+        if "," in s:
+            return [x.strip().strip("'\"") for x in s.split(",") if x.strip()]
+
+        return [s]
+
     return [str(pat)]
+
+
+def _sequence_to_list(seq):
+    """Sequence harus list. Kalau string, kita parse biar jadi list."""
+    if isinstance(seq, list):
+        return [str(x) for x in seq]
+    if isinstance(seq, tuple):
+        return [str(x) for x in seq]
+    if isinstance(seq, str):
+        s = seq.strip()
+        try:
+            v = ast.literal_eval(s)
+            if isinstance(v, (list, tuple)):
+                return [str(x) for x in v]
+        except Exception:
+            pass
+
+        if "→" in s:
+            return [x.strip() for x in s.split("→") if x.strip()]
+        if "->" in s:
+            return [x.strip() for x in s.split("->") if x.strip()]
+
+        if "," in s:
+            return [x.strip().strip("'\"") for x in s.split(",") if x.strip()]
+
+        return [s]
+    return [str(seq)]
+
 
 def _is_subsequence(pattern, seq):
     """Cek apakah pattern muncul sebagai subsequence (urutan) di seq."""
@@ -47,9 +88,10 @@ def build_prefixspan_interpretation(df_pat, sequences, top_k=3):
     if df_pat is None or df_pat.empty or not sequences:
         return [], None
 
+    sequences = [_sequence_to_list(s) for s in sequences]
+
     total_seq = max(len(sequences), 1)
 
-    # support item dasar (untuk lift): proporsi sequence yang mengandung item tsb
     unique_items = sorted({item for seq in sequences for item in seq})
     item_support = {it: sum(1 for seq in sequences if it in seq) / total_seq for it in unique_items}
 
@@ -61,7 +103,7 @@ def build_prefixspan_interpretation(df_pat, sequences, top_k=3):
     else:
         work["_pat_list"] = work.iloc[:, 0].apply(_pattern_to_list)
 
-    # Top-K berdasarkan support_count (kalau ada)
+    # Top-K berdasarkan support_count 
     if "support_count" in work.columns:
         top = work.sort_values("support_count", ascending=False).head(top_k)
     else:
@@ -85,7 +127,7 @@ def build_prefixspan_interpretation(df_pat, sequences, top_k=3):
         base = item_support.get(last, 0.0)
         lift = (conf / base) if base > 0 else float("nan")
 
-        # label kekuatan hubungan (biar gampang dipahami)
+        # label kekuatan hubungan
         if math.isnan(lift):
             strength = "cukup kuat"
         elif lift >= 1.5:
@@ -100,12 +142,10 @@ def build_prefixspan_interpretation(df_pat, sequences, top_k=3):
         prefix_str = " → ".join(prefix)
         pat_str = " → ".join(pat)
 
-        insights.append(
-            f"Jika pelanggan memiliki urutan pembelian **{prefix_str}**, maka sekitar **{conf*100:.2f}%** "
-            f"cenderung diikuti oleh **{last}** (support pola **{supp_ratio*100:.2f}%**, total **{supp_cnt}** sequence). "
-            f"Lift sekuensial **{lift:.2f}** → hubungan **{strength}**. "
-            f"Implikasi: pola **{pat_str}** bisa dipakai untuk *rekomendasi/cross-sell berbasis urutan*."
-        )
+        insights.append(f"Jika pelanggan memiliki urutan pembelian **{prefix_str}**, maka sekitar **{conf*100:.2f}%** "
+                        f"cenderung diikuti oleh **{last}** (support pola **{supp_ratio*100:.2f}%**, total **{supp_cnt}** sequence). "
+                        f"Lift sekuensial **{lift:.2f}** → hubungan **{strength}**. "
+                        f"Implikasi: pola **{pat_str}** bisa dipakai untuk *rekomendasi/cross-sell berbasis urutan*.")
 
     top_view = top.copy()
     top_view["pattern_str"] = top_view["_pat_list"].apply(lambda x: " → ".join(x))
@@ -117,7 +157,7 @@ def build_prefixspan_interpretation(df_pat, sequences, top_k=3):
 def build_iforest_interpretation(hasil_if, top_k=3):
     """
     Interpretasi Top-K customer impulsif:
-    tampilkan skor + 2 indikator numerik paling menonjol dibanding median customer Normal.
+    tampilkan skor & 2 indikator numerik paling menonjol dibanding median customer Normal.
     """
     if hasil_if is None or hasil_if.empty or "anom_score" not in hasil_if.columns:
         return []
@@ -130,8 +170,7 @@ def build_iforest_interpretation(hasil_if, top_k=3):
     baseline = None
     if "status" in hasil_if.columns and num_cols:
         normal = hasil_if[hasil_if["status"] == "Normal"]
-        baseline = (normal[num_cols].median(numeric_only=True) if not normal.empty
-                    else hasil_if[num_cols].median(numeric_only=True))
+        baseline = (normal[num_cols].median(numeric_only=True) if not normal.empty else hasil_if[num_cols].median(numeric_only=True))
 
     lines = []
     for _, r in top_imp.iterrows():
@@ -155,9 +194,9 @@ def build_iforest_interpretation(hasil_if, top_k=3):
         lines.append(f"Customer **{cid}** terdeteksi impulsif dengan skor anomali **{score:.4f}**.{highlight_txt}")
 
     return lines
-# Interpretasi selesai
+# interpretasi selesai
 
-st.set_page_config(page_title="Dashboard PrefixSpan + Isolation Forest", layout="wide")
+st.set_page_config(page_title="Dashboard PrefixSpan & Isolation Forest", layout="wide")
 
 st.title("Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif")
 st.caption("Upload data transaksi → filter tahun & umur → PrefixSpan (pola sekuensial) "
@@ -204,7 +243,7 @@ c1, c2 = st.sidebar.columns(2)
 year_start = c1.number_input("Dari tahun", min_value=min_year_data, max_value=max_year_data, value=min_year_data, step=1)
 year_end   = c2.number_input("Sampai tahun", min_value=min_year_data, max_value=max_year_data, value=max_year_data, step=1)
 
-# Jika input tahun terbalik, otomatis dibetulkan
+# Jika input tahun terbalik, otomatis diperbaiki
 if year_start > year_end:
     year_start, year_end = year_end, year_start
     st.sidebar.info("Rentang tahun dibalik otomatis agar valid.")
@@ -235,7 +274,7 @@ else:
     age_min = c3.number_input("Umur min", min_value=min_age_data, max_value=max_age_data, value=min_age_data, step=1)
     age_max = c4.number_input("Umur max", min_value=min_age_data, max_value=max_age_data, value=max_age_data, step=1)
 
-     # Jika input umur terbalik, otomatis dibetulkan
+     # Jika input umur terbalik, otomatis diperbaiki
     if age_min > age_max:
         age_min, age_max = age_max, age_min
         st.sidebar.info("Range umur dibalik otomatis biar valid.")
@@ -255,7 +294,7 @@ with st.spinner("Memproses data..."):
     df = clean_and_prepare(raw_df)
 
     df_filtered = df.copy()
-    # Terapkan filter tahun (berdasarkan datetime yang sudah diparsing)
+    # Terapkan filter tahun 
     df_filtered = df_filtered[df_filtered["order_year"].between(int(year_start), int(year_end))].copy()
 
      # Terapkan filter umur jika tersedia
@@ -298,6 +337,26 @@ with tab1:
                  f"{int(pd.to_numeric(df_filtered['customer_age'], errors='coerce').min())} –" 
                  f"{int(pd.to_numeric(df_filtered['customer_age'], errors='coerce').max())}")
 
+
+    st.subheader("Interpretasi Singkat")
+    total_rows = len(df_filtered)
+    total_cust = int(df_filtered["customer_id"].nunique())
+    total_orders = int(df_filtered["order_id"].nunique())
+    total_cats = int(df_filtered["category"].nunique())
+    year_min = int(df_filtered["order_year"].min())
+    year_max = int(df_filtered["order_year"].max())
+
+    # Ringkasan hasil deteksi impulsif
+    imp_count = int((hasil_if["status"] == "Impulsif").sum()) if "status" in hasil_if.columns else 0
+    scored_cust = int(hasil_if["customer_id"].nunique()) if "customer_id" in hasil_if.columns else 0
+    imp_pct = (imp_count / scored_cust * 100) if scored_cust else 0.0
+
+    st.info(f"Data yang dianalisis berisi **{total_rows:,}** baris transaksi "
+            f"({total_orders:,} order, {total_cust:,} customer, {total_cats:,} kategori) "
+            f"dengan periode **{year_min}–{year_max}**. "
+            f"Dari **{scored_cust:,}** customer yang dihitung skornya, "
+            f"terdapat **{imp_count:,}** customer terdeteksi impulsif (**{imp_pct:.2f}%**).")
+
     st.caption("Preview data setelah pembersihan & filter")
     st.dataframe(df_filtered.head(50), use_container_width=True)
 
@@ -313,7 +372,11 @@ with tab2:
     st.dataframe(info_ps, use_container_width=True)
     st.dataframe(df_pat, use_container_width=True, height=480)
     st.subheader("Interpretasi (Top 3)")
-    insights, top_view = build_prefixspan_interpretation(df_pat, sequences_all, top_k=3)
+    df_pat_for_interpret = df_pat.copy()
+    if "length" in df_pat_for_interpret.columns:
+        df_pat_for_interpret = df_pat_for_interpret[df_pat_for_interpret["length"] >= 2].copy()
+
+    insights, top_view = build_prefixspan_interpretation(df_pat_for_interpret, sequences_all, top_k=3)
 
     if not insights:
         st.info("Belum ada pola yang cukup untuk diinterpretasikan. Coba turunkan minimum support atau ubah filter.")
@@ -323,13 +386,9 @@ with tab2:
         st.caption("Ringkasan Top 3 pola")
         st.dataframe(top_view, use_container_width=True)
 
-        # opsional: unduh interpretasi
-        st.download_button(
-            "Download interpretasi (TXT)",
-            data=("\n".join([x.replace('**','') for x in insights])).encode("utf-8"),
-            file_name="interpretasi_prefixspan.txt",
-            mime="text/plain",
-        )
+        # unduh interpretasi
+        st.download_button("Download interpretasi (TXT)", data=("\n".join([x.replace('**','') for x in insights])).encode("utf-8"),
+                           file_name="interpretasi_prefixspan.txt", mime="text/plain",)
 
     st.download_button("Download pola", data=df_pat.to_csv(index=False).encode("utf-8"),
                        file_name="prefixspan_patterns.csv", mime="text/csv",)
@@ -355,6 +414,9 @@ with tab4:
     imp_seqs = seq_labeled[seq_labeled["status"] == "Impulsif"]["sequence"].tolist()
 
     MIN_CUSTOMERS_PATTERN = 20
+    pat_n = None
+    pat_i = None
+
     colL, colR = st.columns(2)
 
     with colL:
@@ -378,3 +440,48 @@ with tab4:
             st.dataframe(pat_i, use_container_width=True, height=420)
             st.download_button("Download pola impulsif", data=pat_i.to_csv(index=False).encode("utf-8"),
                                file_name="prefixspan_patterns_impulsive.csv", mime="text/csv",)
+
+    st.divider()
+    st.subheader("Interpretasi Perbandingan")
+
+    if pat_n is None or pat_i is None or pat_n.empty or pat_i.empty:
+        st.info("Interpretasi perbandingan akan muncul jika pola Normal dan Impulsif berhasil ditambang.")
+    else:
+        # tabel perbandingan berdasarkan support_ratio
+        n_df = pat_n[["pattern_str", "support_ratio", "support_count"]].copy()
+        n_df = n_df.rename(columns={"support_ratio": "support_ratio_normal", "support_count": "support_count_normal",})
+
+        i_df = pat_i[["pattern_str", "support_ratio", "support_count"]].copy()
+        i_df = i_df.rename(columns={"support_ratio": "support_ratio_impulsif", "support_count": "support_count_impulsif",})
+
+        cmp_df = i_df.merge(n_df, on="pattern_str", how="outer").fillna(0)
+        cmp_df["delta_support_ratio"] = cmp_df["support_ratio_impulsif"] - cmp_df["support_ratio_normal"]
+
+        # Top pola yang lebih dominan di Impulsif vs Normal
+        top_imp = cmp_df.sort_values("delta_support_ratio", ascending=False).head(5)
+        top_norm = cmp_df.sort_values("delta_support_ratio", ascending=True).head(5)
+
+        st.markdown("**Pola yang lebih dominan pada pelanggan Impulsif (Top 5):**")
+        shown = 0
+        for _, r in top_imp.iterrows():
+            if r["delta_support_ratio"] <= 0:
+                continue
+            st.markdown(f"- **{r['pattern_str']}** "
+                        f"(Impulsif {r['support_ratio_impulsif']*100:.2f}% vs Normal {r['support_ratio_normal']*100:.2f}%)")
+            shown += 1
+        if shown == 0:
+            st.caption("Tidak ada pola yang lebih dominan di Impulsif pada parameter/filter saat ini.")
+
+        st.markdown("**Pola yang lebih dominan pada pelanggan Normal (Top 5):**")
+        shown = 0
+        for _, r in top_norm.iterrows():
+            if r["delta_support_ratio"] >= 0:
+                continue
+            st.markdown(f"- **{r['pattern_str']}** "
+                        f"(Normal {r['support_ratio_normal']*100:.2f}% vs Impulsif {r['support_ratio_impulsif']*100:.2f}%)")
+            shown += 1
+        if shown == 0:
+            st.caption("Tidak ada pola yang lebih dominan di Normal pada parameter/filter saat ini.")
+
+        st.caption("Tabel perbandingan (support_ratio Impulsif vs Normal)")
+        st.dataframe(cmp_df.sort_values("delta_support_ratio", ascending=False), use_container_width=True, height=360,)
