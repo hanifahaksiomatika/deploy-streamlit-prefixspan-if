@@ -8,10 +8,8 @@ from src.anomaly import run_isolation_forest
 st.set_page_config(page_title="Dashboard PrefixSpan + Isolation Forest", layout="wide")
 
 st.title("Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif")
-st.caption(
-    "Upload data transaksi → filter tahun & umur (range) → PrefixSpan (pola sekuensial) "
-    "+ Isolation Forest (deteksi pelanggan impulsif + skor anomali)."
-)
+st.caption("Upload data transaksi → filter tahun & umur → PrefixSpan (pola sekuensial) "
+            "& Isolation Forest (deteksi pelanggan impulsif & skor anomali).")
 
 with st.sidebar:
     st.header("Input & Parameter")
@@ -22,23 +20,23 @@ if uploaded is None:
     st.info("Silakan upload file CSV transaksi untuk memulai.")
     st.stop()
 
-# Read CSV
+# Upload file CSV
 try:
     raw_df = pd.read_csv(uploaded)
 except Exception as e:
     st.error(f"Gagal membaca CSV: {e}")
     st.stop()
 
-# Validate minimal columns early (we'll also alias/rename inside preprocess)
+# Validasi kolom minimum sejak awal
 if raw_df.shape[0] == 0:
     st.warning("File CSV kosong.")
     st.stop()
 
-# --- Sidebar filters: Year range and Age range ---
+# --- Sidebar filter: rentang tahun dan rentang umur ---
 with st.sidebar:
-    st.subheader("Filter Tahun Transaksi (Range)")
+    st.subheader("Filter Tahun Transaksi")
 
-# Detect available years from order_date (best effort)
+# Deteksi tahun yang tersedia dari order_date
 try:
     _dates_tmp = pd.to_datetime(raw_df.get("order_date", pd.Series([], dtype="object")), errors="coerce")
     _years = _dates_tmp.dt.year.dropna().astype(int)
@@ -54,23 +52,24 @@ c1, c2 = st.sidebar.columns(2)
 year_start = c1.number_input("Dari tahun", min_value=min_year_data, max_value=max_year_data, value=min_year_data, step=1)
 year_end   = c2.number_input("Sampai tahun", min_value=min_year_data, max_value=max_year_data, value=max_year_data, step=1)
 
+# Jika input tahun terbalik, otomatis dibetulkan
 if year_start > year_end:
     year_start, year_end = year_end, year_start
-    st.sidebar.info("Range tahun dibalik otomatis biar valid.")
+    st.sidebar.info("Rentang tahun dibalik otomatis agar valid.")
 
 with st.sidebar:
-    st.subheader("Filter Umur Pelanggan (Range)")
-    st.caption("Isi sesuai kebutuhan (mis. Gen Z) — default mengikuti min/max umur di data.")
+    st.subheader("Filter Umur Pelanggan")
 
-# Detect age range
+# Deteksi rentang umur
 age_col_guess = None
 for cand in ["customer_age", "age", "umur", "usia"]:
     if cand in raw_df.columns:
         age_col_guess = cand
         break
 
+# Jika tidak ada kolom umur, filter umur dimatikan
 if age_col_guess is None:
-    st.sidebar.warning("Kolom umur pelanggan tidak ditemukan (mis. `customer_age`). Filter umur dimatikan.")
+    st.sidebar.warning("Kolom umur pelanggan tidak ditemukan. Filter umur dimatikan.")
     age_min, age_max = None, None
 else:
     ages = pd.to_numeric(raw_df[age_col_guess], errors="coerce").dropna()
@@ -84,6 +83,7 @@ else:
     age_min = c3.number_input("Umur min", min_value=min_age_data, max_value=max_age_data, value=min_age_data, step=1)
     age_max = c4.number_input("Umur max", min_value=min_age_data, max_value=max_age_data, value=max_age_data, step=1)
 
+     # Jika input umur terbalik, otomatis dibetulkan
     if age_min > age_max:
         age_min, age_max = age_max, age_min
         st.sidebar.info("Range umur dibalik otomatis biar valid.")
@@ -98,39 +98,39 @@ with st.sidebar:
     n_estimators = st.number_input("n_estimators", min_value=50, max_value=1000, value=100, step=50)
     score_percentile = st.number_input("Threshold impulsif (persentil skor)", min_value=50, max_value=99, value=95, step=1)
 
-# Run pipeline
+# Jalankan pipeline
 with st.spinner("Memproses data..."):
     df = clean_and_prepare(raw_df)
 
     df_filtered = df.copy()
-    # apply year filter (based on parsed datetime)
+    # Terapkan filter tahun (berdasarkan datetime yang sudah diparsing)
     df_filtered = df_filtered[df_filtered["order_year"].between(int(year_start), int(year_end))].copy()
 
-    # apply age filter if available
+     # Terapkan filter umur jika tersedia
     if age_min is not None and age_max is not None and "customer_age" in df_filtered.columns:
         df_filtered = df_filtered[pd.to_numeric(df_filtered["customer_age"], errors="coerce").between(int(age_min), int(age_max))].copy()
 
+    # Hentikan jika data kosong setelah filter
     if df_filtered.empty:
         st.error("Data kosong setelah filter tahun/umur. Coba longgarkan range filternya.")
         st.stop()
 
+    # Bentuk sekuens untuk PrefixSpan
     seq_df = build_sequences(df_filtered)
     sequences_all = seq_df["sequence"].tolist()
 
+    # Bangun tabel order dan fitur customer untuk Isolation Forest
     order_tbl = build_order_table(df_filtered)
     cust_feat = build_customer_features(order_tbl)
 
-    hasil_if, if_info = run_isolation_forest(
-        cust_feat,
-        contamination=float(contamination),
-        n_estimators=int(n_estimators),
-        score_percentile=int(score_percentile),
-        random_state=42,
-    )
+    # Jalankan Isolation Forest untuk deteksi pelanggan impulsif
+    hasil_if, if_info = run_isolation_forest(cust_feat, contamination=float(contamination), n_estimators=int(n_estimators),
+                                             score_percentile=int(score_percentile), random_state=42,)
 
+    # Jalankan PrefixSpan untuk menemukan pola sekuensial
     info_ps, df_pat = run_prefixspan(sequences_all, float(min_support_ratio), min_len=int(min_pattern_len))
 
-# Tabs
+# Tab tampilan
 tab1, tab2, tab3, tab4 = st.tabs(["Ringkasan", "PrefixSpan", "Impulsif (IF)", "Normal vs Impulsif"])
 
 with tab1:
@@ -142,7 +142,9 @@ with tab1:
 
     st.write("**Periode transaksi (setelah filter):**", f"{int(df_filtered['order_year'].min())} – {int(df_filtered['order_year'].max())}")
     if "customer_age" in df_filtered.columns:
-        st.write("**Rentang umur (setelah filter):**", f"{int(pd.to_numeric(df_filtered['customer_age'], errors='coerce').min())} – {int(pd.to_numeric(df_filtered['customer_age'], errors='coerce').max())}")
+        st.write("**Rentang umur (setelah filter):**", 
+                 f"{int(pd.to_numeric(df_filtered['customer_age'], errors='coerce').min())} –" 
+                 f"{int(pd.to_numeric(df_filtered['customer_age'], errors='coerce').max())}")
 
     st.caption("Preview data setelah pembersihan & filter")
     st.dataframe(df_filtered.head(50), use_container_width=True)
@@ -159,12 +161,8 @@ with tab2:
     st.dataframe(info_ps, use_container_width=True)
     st.dataframe(df_pat, use_container_width=True, height=480)
 
-    st.download_button(
-        "Download pola (CSV)",
-        data=df_pat.to_csv(index=False).encode("utf-8"),
-        file_name="prefixspan_patterns.csv",
-        mime="text/csv",
-    )
+    st.download_button("Download pola", data=df_pat.to_csv(index=False).encode("utf-8"),
+                       file_name="prefixspan_patterns.csv", mime="text/csv",)
 
 with tab3:
     st.subheader("Hasil Isolation Forest (Deteksi Pelanggan Impulsif)")
@@ -173,17 +171,12 @@ with tab3:
     st.caption("Daftar customer (urut skor anomali tertinggi)")
     st.dataframe(hasil_if.sort_values("anom_score", ascending=False), use_container_width=True, height=520)
 
-    st.download_button(
-        "Download pelanggan impulsif (CSV)",
-        data=hasil_if.to_csv(index=False).encode("utf-8"),
-        file_name="impulsive_customers_iforest.csv",
-        mime="text/csv",
-    )
+    st.download_button("Download pelanggan impulsif", data=hasil_if.to_csv(index=False).encode("utf-8"),
+                       file_name="impulsive_customers_iforest.csv", mime="text/csv",)
 
 with tab4:
     st.subheader("Perbandingan Pola Normal vs Impulsif")
 
-    # merge sequences with status
     seq_labeled = seq_df.merge(hasil_if[["customer_id", "status", "anom_score"]], on="customer_id", how="inner")
     normal_seqs = seq_labeled[seq_labeled["status"] == "Normal"]["sequence"].tolist()
     imp_seqs = seq_labeled[seq_labeled["status"] == "Impulsif"]["sequence"].tolist()
@@ -199,12 +192,8 @@ with tab4:
             info_n, pat_n = run_prefixspan(normal_seqs, float(min_support_ratio), min_len=int(min_pattern_len))
             st.dataframe(info_n, use_container_width=True)
             st.dataframe(pat_n, use_container_width=True, height=420)
-            st.download_button(
-                "Download pola normal (CSV)",
-                data=pat_n.to_csv(index=False).encode("utf-8"),
-                file_name="prefixspan_patterns_normal.csv",
-                mime="text/csv",
-            )
+            st.download_button("Download pola normal", data=pat_n.to_csv(index=False).encode("utf-8"),
+                               file_name="prefixspan_patterns_normal.csv", mime="text/csv",)
 
     with colR:
         st.markdown("### Impulsif")
@@ -214,9 +203,5 @@ with tab4:
             info_i, pat_i = run_prefixspan(imp_seqs, float(min_support_ratio), min_len=int(min_pattern_len))
             st.dataframe(info_i, use_container_width=True)
             st.dataframe(pat_i, use_container_width=True, height=420)
-            st.download_button(
-                "Download pola impulsif (CSV)",
-                data=pat_i.to_csv(index=False).encode("utf-8"),
-                file_name="prefixspan_patterns_impulsive.csv",
-                mime="text/csv",
-            )
+            st.download_button("Download pola impulsif", data=pat_i.to_csv(index=False).encode("utf-8"),
+                               file_name="prefixspan_patterns_impulsive.csv", mime="text/csv",)
