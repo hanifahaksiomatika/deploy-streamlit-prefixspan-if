@@ -5,6 +5,158 @@ from src.preprocess import clean_and_prepare, build_sequences, build_order_table
 from src.mining import run_prefixspan
 from src.anomaly import run_isolation_forest
 
+# ===== Tambahan: Interpretasi otomatis (PrefixSpan & Isolation Forest) =====
+import ast
+import math
+
+def _pattern_to_list(pat):
+    """Pattern bisa list/tuple, atau string 'A -> B', atau string repr list."""
+    if isinstance(pat, (list, tuple)):
+        return list(pat)
+    if isinstance(pat, str):
+        if "->" in pat:
+            return [x.strip() for x in pat.split("->")]
+        try:
+            v = ast.literal_eval(pat)
+            if isinstance(v, (list, tuple)):
+                return list(v)
+        except Exception:
+            return [pat]
+    return [str(pat)]
+
+def _is_subsequence(pattern, seq):
+    """Cek apakah pattern muncul sebagai subsequence (urutan) di seq."""
+    j = 0
+    for item in seq:
+        if j < len(pattern) and item == pattern[j]:
+            j += 1
+            if j == len(pattern):
+                return True
+    return j == len(pattern)
+
+def _support_count(pattern, sequences):
+    return sum(1 for s in sequences if _is_subsequence(pattern, s))
+
+def build_prefixspan_interpretation(df_pat, sequences, top_k=3):
+    """
+    Interpretasi Top-K pola PrefixSpan berbasis:
+    - support_ratio: seberapa sering pola muncul di seluruh sequence
+    - confidence sekuensial: P(last | prefix)
+    - lift sekuensial: confidence / support(last)
+    """
+    if df_pat is None or df_pat.empty or not sequences:
+        return [], None
+
+    total_seq = max(len(sequences), 1)
+
+    # support item dasar (untuk lift): proporsi sequence yang mengandung item tsb
+    unique_items = sorted({item for seq in sequences for item in seq})
+    item_support = {it: sum(1 for seq in sequences if it in seq) / total_seq for it in unique_items}
+
+    work = df_pat.copy()
+    if "pattern_str" in work.columns:
+        work["_pat_list"] = work["pattern_str"].apply(_pattern_to_list)
+    elif "pattern" in work.columns:
+        work["_pat_list"] = work["pattern"].apply(_pattern_to_list)
+    else:
+        work["_pat_list"] = work.iloc[:, 0].apply(_pattern_to_list)
+
+    # Top-K berdasarkan support_count (kalau ada)
+    if "support_count" in work.columns:
+        top = work.sort_values("support_count", ascending=False).head(top_k)
+    else:
+        top = work.head(top_k)
+
+    insights = []
+    for _, row in top.iterrows():
+        pat = row["_pat_list"]
+        if len(pat) < 2:
+            continue
+
+        prefix = pat[:-1]
+        last = pat[-1]
+
+        supp_cnt = int(row["support_count"]) if "support_count" in row else _support_count(pat, sequences)
+        supp_ratio = supp_cnt / total_seq
+
+        prefix_cnt = _support_count(prefix, sequences)
+        conf = (supp_cnt / prefix_cnt) if prefix_cnt > 0 else 0.0
+
+        base = item_support.get(last, 0.0)
+        lift = (conf / base) if base > 0 else float("nan")
+
+        # label kekuatan hubungan (biar gampang dipahami)
+        if math.isnan(lift):
+            strength = "cukup kuat"
+        elif lift >= 1.5:
+            strength = "sangat kuat"
+        elif lift >= 1.2:
+            strength = "kuat"
+        elif lift >= 1.0:
+            strength = "cukup"
+        else:
+            strength = "lemah"
+
+        prefix_str = " → ".join(prefix)
+        pat_str = " → ".join(pat)
+
+        insights.append(
+            f"Jika pelanggan memiliki urutan pembelian **{prefix_str}**, maka sekitar **{conf*100:.2f}%** "
+            f"cenderung diikuti oleh **{last}** (support pola **{supp_ratio*100:.2f}%**, total **{supp_cnt}** sequence). "
+            f"Lift sekuensial **{lift:.2f}** → hubungan **{strength}**. "
+            f"Implikasi: pola **{pat_str}** bisa dipakai untuk *rekomendasi/cross-sell berbasis urutan*."
+        )
+
+    top_view = top.copy()
+    top_view["pattern_str"] = top_view["_pat_list"].apply(lambda x: " → ".join(x))
+    cols_show = [c for c in ["pattern_str", "support_count", "support_ratio", "length"] if c in top_view.columns]
+    top_view = top_view[cols_show] if cols_show else top_view[["pattern_str"]]
+
+    return insights, top_view
+
+def build_iforest_interpretation(hasil_if, top_k=3):
+    """
+    Interpretasi Top-K customer impulsif:
+    tampilkan skor + 2 indikator numerik paling menonjol dibanding median customer Normal.
+    """
+    if hasil_if is None or hasil_if.empty or "anom_score" not in hasil_if.columns:
+        return []
+
+    top_imp = hasil_if.sort_values("anom_score", ascending=False).head(top_k)
+
+    num_cols = hasil_if.select_dtypes(include="number").columns.tolist()
+    num_cols = [c for c in num_cols if c != "anom_score"]
+
+    baseline = None
+    if "status" in hasil_if.columns and num_cols:
+        normal = hasil_if[hasil_if["status"] == "Normal"]
+        baseline = (normal[num_cols].median(numeric_only=True) if not normal.empty
+                    else hasil_if[num_cols].median(numeric_only=True))
+
+    lines = []
+    for _, r in top_imp.iterrows():
+        cid = r.get("customer_id", "-")
+        score = float(r["anom_score"])
+
+        highlight_txt = ""
+        if baseline is not None and num_cols:
+            ratios = []
+            for c in num_cols:
+                b = baseline.get(c, float("nan"))
+                v = r.get(c, float("nan"))
+                if pd.isna(b) or pd.isna(v):
+                    continue
+                ratio = (float("inf") if (b == 0 and v != 0) else (1.0 if (b == 0 and v == 0) else v / b))
+                ratios.append((c, ratio))
+            ratios = sorted(ratios, key=lambda x: x[1], reverse=True)[:2]
+            if ratios:
+                highlight_txt = " Indikator menonjol: " + ", ".join([f"**{c}** ~{ratio:.2f}x median normal" for c, ratio in ratios]) + "."
+
+        lines.append(f"Customer **{cid}** terdeteksi impulsif dengan skor anomali **{score:.4f}**.{highlight_txt}")
+
+    return lines
+# ===== End tambahan interpretasi =====
+
 st.set_page_config(page_title="Dashboard PrefixSpan + Isolation Forest", layout="wide")
 
 st.title("Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif")
@@ -160,6 +312,24 @@ with tab2:
     st.subheader("Hasil PrefixSpan")
     st.dataframe(info_ps, use_container_width=True)
     st.dataframe(df_pat, use_container_width=True, height=480)
+    st.subheader("Interpretasi (Top 3)")
+    insights, top_view = build_prefixspan_interpretation(df_pat, sequences_all, top_k=3)
+
+    if not insights:
+        st.info("Belum ada pola yang cukup untuk diinterpretasikan. Coba turunkan minimum support atau ubah filter.")
+    else:
+        for t in insights:
+            st.markdown(f"- {t}")
+        st.caption("Ringkasan Top 3 pola")
+        st.dataframe(top_view, use_container_width=True)
+
+        # opsional: unduh interpretasi
+        st.download_button(
+            "Download interpretasi (TXT)",
+            data=("\n".join([x.replace('**','') for x in insights])).encode("utf-8"),
+            file_name="interpretasi_prefixspan.txt",
+            mime="text/plain",
+        )
 
     st.download_button("Download pola", data=df_pat.to_csv(index=False).encode("utf-8"),
                        file_name="prefixspan_patterns.csv", mime="text/csv",)
@@ -167,6 +337,9 @@ with tab2:
 with tab3:
     st.subheader("Hasil Isolation Forest (Deteksi Pelanggan Impulsif)")
     st.dataframe(if_info, use_container_width=True)
+    st.subheader("Interpretasi (Top 3 pelanggan impulsif)")
+    for t in build_iforest_interpretation(hasil_if, top_k=3):
+        st.markdown(f"- {t}")
 
     st.caption("Daftar customer (urut skor anomali tertinggi)")
     st.dataframe(hasil_if.sort_values("anom_score", ascending=False), use_container_width=True, height=520)
