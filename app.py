@@ -1,15 +1,12 @@
 import streamlit as st
 import pandas as pd
 import ast
-import math
 
 from src.preprocess import clean_and_prepare, build_sequences, build_order_table, build_customer_features
 from src.mining import run_prefixspan
 from src.anomaly import run_isolation_forest
 
 # Interpretasi otomatis (PrefixSpan & Isolation Forest)
-
-
 def _pattern_to_list(pat):
     """Pattern bisa list/tuple, atau string 'A -> B', atau string 'A → B', atau repr list."""
     if isinstance(pat, (list, tuple)):
@@ -191,7 +188,7 @@ def build_iforest_interpretation(hasil_if, top_k=3):
         lines.append(f"Customer **{cid}** terdeteksi impulsif dengan skor anomali **{score:.4f}**.{highlight_txt}")
 
     return lines
-# interpretasi
+# interpretasi selesai
 
 st.set_page_config(page_title="Dashboard PrefixSpan + Isolation Forest", layout="wide")
 
