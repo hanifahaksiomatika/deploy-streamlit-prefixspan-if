@@ -2,19 +2,30 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from src.preprocess import (clean_and_prepare,apply_filters,build_order_table,build_customer_features,build_sequences,)
+from src.preprocess import (
+    clean_and_prepare,
+    apply_filters,
+    build_order_table,
+    build_customer_features,
+    build_sequences,
+)
 from src.mining import run_prefixspan
 from src.anomaly import run_isolation_forest
-from src.interpret import (interpret_prefixspan_topk,interpret_iforest_topk,compare_patterns,)
+from src.interpret import (
+    interpret_prefixspan_topk,
+    interpret_iforest_topk,
+    compare_patterns,
+)
 
 st.set_page_config(page_title="Dashboard PrefixSpan + Isolation Forest", layout="wide")
 
 st.title("Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif")
 st.caption(
     "Upload data transaksi → filter tahun & umur (opsional segmen Gen Z) → "
-    "PrefixSpan (pola sekuensial) & Isolation Forest (deteksi pelanggan impulsif + skor anomali).")
+    "PrefixSpan (pola sekuensial) & Isolation Forest (deteksi pelanggan impulsif + skor anomali)."
+)
 
-# Sidebar: Input 
+# =============== Sidebar: Input ===============
 with st.sidebar:
     st.header("Input & Parameter")
     uploaded = st.file_uploader("Upload CSV transaksi", type=["csv"])
@@ -23,7 +34,7 @@ if uploaded is None:
     st.info("Silakan upload file CSV transaksi untuk memulai.")
     st.stop()
 
-# Load CSV 
+# =============== Load CSV ===============
 try:
     raw_df = pd.read_csv(uploaded)
 except Exception as e:
@@ -34,11 +45,11 @@ if raw_df.empty:
     st.warning("File CSV kosong.")
     st.stop()
 
-# Preprocess minimal (parse date, columns) 
+# =============== Preprocess minimal (parse date, columns) ===============
 with st.spinner("Menyiapkan data..."):
     df = clean_and_prepare(raw_df)
 
-# Sidebar: Filters
+# =============== Sidebar: Filters ===============
 with st.sidebar:
     st.subheader("Filter Data")
 
@@ -91,7 +102,7 @@ with st.sidebar:
     n_estimators = st.number_input("n_estimators", min_value=50, max_value=1000, value=100, step=50)
     score_percentile = st.number_input("Threshold impulsif (persentil skor)", min_value=50, max_value=99, value=95, step=1)
 
-# Run pipeline 
+# =============== Run pipeline ===============
 with st.spinner("Memproses data & menjalankan model..."):
     df_filtered = apply_filters(
         df,
@@ -99,7 +110,8 @@ with st.spinner("Memproses data & menjalankan model..."):
         year_end=int(year_end),
         age_min=None if age_min is None else int(age_min),
         age_max=None if age_max is None else int(age_max),
-        segment=segment,)
+        segment=segment,
+    )
 
     if df_filtered.empty:
         st.error("Data kosong setelah filter. Coba longgarkan filter tahun/umur atau nonaktifkan segmen Gen Z.")
@@ -114,7 +126,8 @@ with st.spinner("Memproses data & menjalankan model..."):
         contamination=float(contamination),
         n_estimators=int(n_estimators),
         score_percentile=int(score_percentile),
-        random_state=42,)
+        random_state=42,
+    )
 
     # sequences for PrefixSpan include discount token
     seq_df = build_sequences(df_filtered, hasil_if, min_seq_len=int(min_seq_len))
@@ -125,12 +138,13 @@ with st.spinner("Memproses data & menjalankan model..."):
         sequences_all,
         min_support_ratio=float(min_support_ratio),
         min_len=int(min_pattern_len),
-        max_len=int(max_pattern_len),)
+        max_len=int(max_pattern_len),
+    )
 
-# Tabs 
+# =============== Tabs ===============
 tab1, tab2, tab3, tab4 = st.tabs(["Ringkasan", "PrefixSpan", "Impulsif (IF)", "Normal vs Impulsif"])
 
-# Tab 1: Summary
+# ---- Tab 1: Summary ----
 with tab1:
     st.subheader("Ringkasan Data")
 
@@ -153,7 +167,8 @@ with tab1:
     st.write(
         f"Data yang dianalisis berjumlah **{len(df_filtered):,}** baris transaksi dengan **{total_cust:,}** pelanggan unik. "
         f"Berdasarkan Isolation Forest, terdeteksi **{n_imp:,}** pelanggan impulsif (**{pct_imp:.2f}%** dari total pelanggan) "
-        f"pada rentang data yang dipilih.")
+        f"pada rentang data yang dipilih."
+    )
 
     st.caption("Preview data setelah pembersihan & filter")
     st.dataframe(df_filtered.head(50), use_container_width=True)
@@ -165,7 +180,7 @@ with tab1:
     c2.write("Customer features (cust_feat)")
     c2.dataframe(cust_feat.head(20), use_container_width=True)
 
-# Tab 2: PrefixSpan 
+# ---- Tab 2: PrefixSpan ----
 with tab2:
     st.subheader("Hasil PrefixSpan")
     st.dataframe(pd.DataFrame([info_ps]), use_container_width=True)
@@ -185,15 +200,17 @@ with tab2:
             "Download interpretasi (TXT)",
             data="\n".join(insights).encode("utf-8"),
             file_name="interpretasi_prefixspan_top3.txt",
-            mime="text/plain",)
+            mime="text/plain",
+        )
 
     st.download_button(
         "Download pola (CSV)",
         data=df_pat.to_csv(index=False).encode("utf-8"),
         file_name="prefixspan_patterns.csv",
-        mime="text/csv",)
+        mime="text/csv",
+    )
 
-# Tab 3: Isolation Forest
+# ---- Tab 3: Isolation Forest ----
 with tab3:
     st.subheader("Hasil Isolation Forest (Deteksi Pelanggan Impulsif)")
     st.dataframe(pd.DataFrame([if_info]), use_container_width=True)
@@ -213,9 +230,10 @@ with tab3:
         "Download pelanggan impulsif (CSV)",
         data=hasil_if.to_csv(index=False).encode("utf-8"),
         file_name="impulsive_customers_iforest.csv",
-        mime="text/csv",)
+        mime="text/csv",
+    )
 
-# Tab 4: Normal vs Impulsif 
+# ---- Tab 4: Normal vs Impulsif ----
 with tab4:
     st.subheader("Perbandingan Pola Normal vs Impulsif")
 

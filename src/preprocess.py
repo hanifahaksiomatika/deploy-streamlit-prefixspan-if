@@ -1,135 +1,191 @@
 import pandas as pd
 import numpy as np
 
-# ---------- Column aliasing ----------
-ALIASES = {
-    "customer_id": ["customer_id", "cust_id", "customer", "id_customer", "id_pelanggan"],
-    "order_id": ["order_id", "transaction_id", "trx_id", "invoice_id", "id_order", "id_transaksi"],
-    "order_date": ["order_date", "tanggal", "tanggal_transaksi", "date", "trx_date"],
-    "category": ["category", "kategori", "product_category", "kategori_produk"],
-    "total_amount": ["total_amount", "amount", "total", "order_total", "order_amount", "order_value", "harga_total"],
-    "quantity": ["quantity", "qty", "jumlah", "items", "item_count"],
-    "discount": ["discount", "diskon", "discount_amount", "potongan"],
-    "customer_age": ["customer_age", "age", "umur", "usia"],
-}
-
-def _rename_with_aliases(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    cols = list(df.columns)
-    mapping = {}
-    for target, candidates in ALIASES.items():
-        for c in candidates:
-            if c in cols:
-                mapping[c] = target
-                break
-    return df.rename(columns=mapping)
+REQUIRED_COLS = [
+    "customer_id",
+    "order_id",
+    "order_date",
+    "category",
+    "total_amount",
+    "quantity",
+    "discount",
+]
 
 def clean_and_prepare(raw_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Cleaning minimal mengikuti notebook:
-    - rename kolom (alias)
-    - parse order_date
-    - normalisasi category
-    - filter total_amount > 0 dan quantity > 0
-    - buat has_discount dan order_year
+    Minimal cleaning supaya konsisten dengan notebook riset_utama.ipynb:
+    - pastikan kolom ada (rename beberapa alias umum)
+    - parse order_date → order_year
+    - has_discount = discount > 0
+    - normalisasi tipe data dasar
     """
-    df = _rename_with_aliases(raw_df)
+    df = raw_df.copy()
 
-    required = ["customer_id", "order_id", "order_date", "category", "total_amount", "quantity", "discount"]
-    missing = [c for c in required if c not in df.columns]
+    # alias mapping (biar fleksibel)
+    rename_map = {
+        "cust_id": "customer_id",
+        "customer": "customer_id",
+        "id_customer": "customer_id",
+        "order": "order_id",
+        "orderid": "order_id",
+        "tanggal": "order_date",
+        "date": "order_date",
+        "product_category": "category",
+        "kategori": "category",
+        "amount": "total_amount",
+        "total": "total_amount",
+        "qty": "quantity",
+        "jumlah": "quantity",
+        "disc": "discount",
+        "potongan": "discount",
+        "umur": "customer_age",
+        "usia": "customer_age",
+        "age": "customer_age",
+    }
+    for k, v in rename_map.items():
+        if k in df.columns and v not in df.columns:
+            df = df.rename(columns={k: v})
+
+    # validate minimal columns
+    missing = [c for c in REQUIRED_COLS if c not in df.columns]
     if missing:
-        raise ValueError(f"Kolom wajib tidak ditemukan: {missing}. "
-                         f"Pastikan CSV punya kolom minimal: {required} (customer_age opsional).")
+        raise ValueError(f"Kolom wajib tidak ditemukan: {missing}. Pastikan CSV punya minimal kolom {REQUIRED_COLS}.")
 
     # parse date
     df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
     df = df.dropna(subset=["order_date"]).copy()
+    df["order_year"] = df["order_date"].dt.year
 
-    # normalize category
-    df["category"] = df["category"].astype(str).str.strip()
-
-    # numeric
-    df["total_amount"] = pd.to_numeric(df["total_amount"], errors="coerce")
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
-    df["discount"] = pd.to_numeric(df["discount"], errors="coerce").fillna(0)
-
-    df = df[(df["total_amount"] > 0) & (df["quantity"] > 0)].copy()
+    # numeric coercion
+    for c in ["total_amount", "quantity", "discount"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
     # age optional
     if "customer_age" in df.columns:
         df["customer_age"] = pd.to_numeric(df["customer_age"], errors="coerce")
 
-    df["has_discount"] = (df["discount"].fillna(0) > 0).astype(int)
-    df["order_year"] = df["order_date"].dt.year.astype(int)
+    # has_discount
+    df["has_discount"] = (df["discount"] > 0).astype(int)
 
-    # Sort for reproducibility
-    df = df.sort_values(["customer_id", "order_date", "order_id"]).reset_index(drop=True)
+    # tidy strings
+    df["category"] = df["category"].astype(str).str.strip()
+    df["customer_id"] = df["customer_id"].astype(str).str.strip()
+    df["order_id"] = df["order_id"].astype(str).str.strip()
 
     return df
 
-def collapse_consecutive(items):
-    out = []
-    for v in items:
-        if len(out) == 0 or v != out[-1]:
-            out.append(v)
-    return out
+def apply_filters(
+    df: pd.DataFrame,
+    year_start: int,
+    year_end: int,
+    age_min: int | None,
+    age_max: int | None,
+    segment: str,
+) -> pd.DataFrame:
+    out = df.copy()
 
-def build_sequences(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Sequence per customer: list category ordered by time + collapse consecutive duplicates.
-    """
-    df_seq = df.sort_values(["customer_id", "order_date", "order_id"]).copy()
-    seq_df = df_seq.groupby("customer_id")["category"].apply(list).reset_index(name="sequence")
-    seq_df["sequence"] = seq_df["sequence"].apply(collapse_consecutive)
-    seq_df["sequence_length"] = seq_df["sequence"].apply(len)
-    return seq_df
+    # tahun transaksi
+    if "order_year" in out.columns:
+        out = out[out["order_year"].between(int(year_start), int(year_end))].copy()
+
+    # segmen Gen Z berdasarkan aturan tahun transaksi (sesuai notebook)
+    if segment.startswith("Gen Z"):
+        if "customer_age" in out.columns and "order_year" in out.columns:
+            genz = (
+                ((out["order_year"] == 2023) & (out["customer_age"].between(11, 26))) |
+                ((out["order_year"] == 2024) & (out["customer_age"].between(12, 27))) |
+                ((out["order_year"] == 2025) & (out["customer_age"].between(13, 28)))
+            )
+            out = out[genz].copy()
+        else:
+            # kalau nggak ada umur, kita nggak bisa apply Gen Z
+            out = out.iloc[0:0].copy()
+
+    # umur custom (kalau ada)
+    if age_min is not None and age_max is not None and "customer_age" in out.columns:
+        age_num = pd.to_numeric(out["customer_age"], errors="coerce")
+        out = out[age_num.between(int(age_min), int(age_max))].copy()
+
+    return out
 
 def build_order_table(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Order-level table mengikuti notebook:
+    Order-level table sesuai notebook:
     groupby customer_id, order_id:
       - order_date min
       - order_total sum(total_amount)
       - items sum(quantity)
       - has_discount max
+      - avg_discount mean(discount)
+    + gap_days per customer
     """
     order_tbl = (
         df.groupby(["customer_id", "order_id"])
-          .agg(
-              order_date=("order_date", "min"),
-              order_total=("total_amount", "sum"),
-              items=("quantity", "sum"),
-              has_discount=("has_discount", "max"),
-          )
-          .reset_index()
-          .sort_values(["customer_id", "order_date", "order_id"])
-          .reset_index(drop=True)
+        .agg(
+            order_date=("order_date", "min"),
+            order_total=("total_amount", "sum"),
+            items=("quantity", "sum"),
+            has_discount=("has_discount", "max"),
+            avg_discount=("discount", "mean"),
+        )
+        .reset_index()
+        .sort_values(["customer_id", "order_date", "order_id"])
+        .reset_index(drop=True)
     )
+
+    order_tbl["gap_days"] = order_tbl.groupby("customer_id")["order_date"].diff().dt.days
     return order_tbl
 
 def build_customer_features(order_tbl: pd.DataFrame) -> pd.DataFrame:
     """
-    Customer-level features mengikuti notebook:
-    jml_order, total_spend, avg_order, std_order, avg_items, discount_rate, avg_gap_days
+    Fitur customer-level (mengikuti notebook):
+      jml_order, total_spend, avg_order, std_order, avg_items, avg_gap_days,
+      discount_order_ratio, avg_discount_rate
     """
-    tmp = order_tbl.sort_values(["customer_id", "order_date"]).copy()
-    tmp["gap_days"] = tmp.groupby("customer_id")["order_date"].diff().dt.days
+    tmp = order_tbl.copy()
+    if "gap_days" in tmp.columns:
+        med_gap = tmp["gap_days"].median()
+        tmp["gap_days"] = tmp["gap_days"].fillna(med_gap if pd.notna(med_gap) else 0)
 
     cust_feat = (
         tmp.groupby("customer_id")
-           .agg(
-               jml_order=("order_id", "nunique"),
-               total_spend=("order_total", "sum"),
-               avg_order=("order_total", "mean"),
-               std_order=("order_total", "std"),
-               avg_items=("items", "mean"),
-               discount_rate=("has_discount", "mean"),
-               avg_gap_days=("gap_days", "mean"),
-           )
-           .reset_index()
+        .agg(
+            jml_order=("order_id", "nunique"),
+            total_spend=("order_total", "sum"),
+            avg_order=("order_total", "mean"),
+            std_order=("order_total", "std"),
+            avg_items=("items", "mean"),
+            avg_gap_days=("gap_days", "mean"),
+            discount_order_ratio=("has_discount", "mean"),
+            avg_discount_rate=("avg_discount", "mean"),
+        )
+        .reset_index()
+    )
+    cust_feat["std_order"] = cust_feat["std_order"].fillna(0)
+    return cust_feat
+
+def build_sequences(df_filtered: pd.DataFrame, hasil_if: pd.DataFrame, min_seq_len: int = 2) -> pd.DataFrame:
+    """
+    Sequence per customer TANPA collapse, menggunakan token category_D / category_ND
+    seperti notebook (cat_token).
+    """
+    df_seq = df_filtered.sort_values(["customer_id", "order_date", "order_id"]).copy()
+
+    df_seq["has_discount"] = df_seq["has_discount"].astype(int)
+    df_seq["cat_token"] = np.where(
+        df_seq["has_discount"] == 1,
+        df_seq["category"].astype(str).str.strip() + "_D",
+        df_seq["category"].astype(str).str.strip() + "_ND",
     )
 
-    cust_feat["std_order"] = cust_feat["std_order"].fillna(0)
-    cust_feat["avg_gap_days"] = cust_feat["avg_gap_days"].fillna(cust_feat["avg_gap_days"].median() if cust_feat["avg_gap_days"].notna().any() else 0)
+    # merge label IF (status & anom_score)
+    if hasil_if is not None and not hasil_if.empty and "customer_id" in hasil_if.columns:
+        df_seq = df_seq.merge(hasil_if[["customer_id", "status", "anom_score"]], on="customer_id", how="left")
+    else:
+        df_seq["status"] = "Unknown"
+        df_seq["anom_score"] = np.nan
 
-    return cust_feat
+    seq_df = df_seq.groupby(["customer_id", "status"])["cat_token"].apply(list).reset_index(name="sequence")
+    seq_df["sequence_length"] = seq_df["sequence"].apply(len)
+    seq_df = seq_df[seq_df["sequence_length"] >= int(min_seq_len)].copy()
+    return seq_df

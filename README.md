@@ -1,32 +1,27 @@
-Link Streamlit: https://deploy-app-prefixspan-if.streamlit.app/
+# Dashboard PrefixSpan + Isolation Forest (Streamlit)
 
-# Streamlit Deployment — PrefixSpan + Isolation Forest (Range Filter)
+Aplikasi ini mengimplementasikan deployment penelitian:
+- **PrefixSpan** untuk mengekstraksi pola sekuensial pembelian (sequence per customer, token kategori + status diskon).
+- **Isolation Forest** untuk mendeteksi pelanggan impulsif berbasis fitur agregat per pelanggan dan skor anomali.
 
-Aplikasi Streamlit untuk:
-- Mining pola sekuensial transaksi (PrefixSpan)
-- Deteksi pelanggan impulsif + skor anomali (Isolation Forest)
+## Menjalankan via Anaconda (Windows)
 
-Fitur filter:
-- Range tahun transaksi (Dari–Sampai)
-- Range umur pelanggan (Min–Max)
+1. Buka **Anaconda Prompt**
+2. Masuk folder project:
+   - `cd /d C:\Hani\skripsi\deploy_streamlit_prefixspan_if`
+3. Buat & aktifkan environment:
+   - `conda create -n skripsi_streamlit python=3.10 -y`
+   - `conda activate skripsi_streamlit`
+4. Install dependency:
+   - `pip install -r requirements.txt`
+5. Jalankan:
+   - `streamlit run app.py`
 
-## Menjalankan di Lokal (Anaconda)
-```bash
-cd /d C:\Hani\skripsi\deploy_streamlit_riset_utama_baru_rangefilters
-conda create -n skripsi_streamlit python=3.10 -y
-conda activate skripsi_streamlit
-pip install -r requirements.txt
-streamlit run app.py
-```
+## Update ke repo GitHub lama
+Copy/overwrite file `app.py`, folder `src/`, dan `requirements.txt` ke folder repo lama, lalu:
+- `git add .`
+- `git commit -m "Update dashboard"`
+- `git pull origin main`
+- `git push origin main`
 
-## Kolom CSV Minimal
-- customer_id
-- order_id
-- order_date
-- category
-- total_amount
-- quantity
-- discount
-- customer_age (opsional, tapi dibutuhkan untuk filter umur)
-
-Catatan: beberapa nama kolom umum akan di-*auto-map* (alias) di `src/preprocess.py`.
+Streamlit Cloud akan redeploy otomatis jika repo sudah terhubung.
