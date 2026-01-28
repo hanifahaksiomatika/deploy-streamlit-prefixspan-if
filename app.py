@@ -1,21 +1,21 @@
 import time
 from collections import Counter, defaultdict
+import io
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
 
 from src.preprocess import (
     clean_and_prepare,
     apply_filters,
     build_order_table,
     build_customer_features,
-    build_sequences,)
+    build_sequences,
+)
 from src.mining import run_prefixspan
 from src.anomaly import run_isolation_forest
 from src.interpret import interpret_prefixspan_topk, interpret_iforest_topk, compare_patterns
-
 
 MIN_SUPPORT_RATIO = 0.01
 MIN_PATTERN_LEN   = 2
@@ -48,7 +48,6 @@ def _humanize_pattern_str(p: str) -> str:
 def _humanize_text(text: str, categories: list[str]) -> str:
     """Ganti token category_D / category_ND menjadi label yang lebih manusiawi di teks."""
     out = text
-    # replace longest first (biar aman kalau ada kategori mirip)
     cats = sorted(set([str(c).strip() for c in categories if pd.notna(c)]), key=len, reverse=True)
     for c in cats:
         out = out.replace(f"{c}_D", f"{c} (Diskon)")
@@ -86,13 +85,14 @@ def _discount_strength_label(cust_if: pd.DataFrame) -> dict:
         "Indikator diskon": ["Rasio order pakai diskon", "Rata-rata nilai diskon per order"],
         "Median Normal": [float(med_norm.get("discount_order_ratio", 0)), float(med_norm.get("avg_discount_rate", 0))],
         "Median Impulsif": [float(med_imp.get("discount_order_ratio", 0)), float(med_imp.get("avg_discount_rate", 0))],
-        "Selisih (Impulsif - Normal)": [diff_ratio, diff_rate],})
+        "Selisih (Impulsif - Normal)": [diff_ratio, diff_rate],
+    })
 
     if kuat:
-        out["text"].append("Diskon **berpengaruh kuat** terhadap impulsif: pelanggan impulsif cenderung lebih sering memanfaatkan diskon dibanding pelanggan normal.")
+        out["text"].append("Diskon **berpengaruh kuat** terhadap impulsif. Pelanggan impulsif cenderung lebih sering memanfaatkan diskon dibanding pelanggan normal.")
     else:
-        out["text"].append("Diskon **berpengaruh lemah** terhadap impulsif: arah pengaruh tetap terlihat (Impulsif > Normal), namun selisihnya tidak terlalu besar.")
-    out["text"].append("Catatan: temuan ini bersifat **asosiasi** dari data transaksi (bukan bukti kausal), tetapi cukup untuk dasar strategi promosi & rekomendasi.")
+        out["text"].append("Diskon **berpengaruh lemah** terhadap impulsif. Arah pengaruh tetap terlihat (Impulsif > Normal), namun selisihnya tidak terlalu besar.")
+    out["text"].append("Temuan ini bersifat **asosiasi** dari data transaksi (bukan bukti kausal), tetapi cukup untuk dasar strategi promosi & rekomendasi.")
     return out
 
 def _trigger_stats(sequences: list[list[str]], suffix: str = "_D", top_k: int = 3):
@@ -127,9 +127,9 @@ def _trigger_stats(sequences: list[list[str]], suffix: str = "_D", top_k: int = 
             "occurrences": int(cnt),
             "prob_buy_again": float(prob_next),
             "top_next": nxt,
-            "prob_top_next_given_next": float(prob_nxt),})
+            "prob_top_next_given_next": float(prob_nxt),
+        })
     return pd.DataFrame(rows)
-
 
 def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     """Convert dataframe to UTF-8-SIG CSV bytes (Excel-friendly)."""
@@ -138,9 +138,9 @@ def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8-sig")
 
 
-st.set_page_config(page_title="Dashboard Analisis Pola Pembelian Pada Pelanggan Impulsif", layout="wide")
-st.title("Dashboard Analisis Pola Pembelian Pada Pelanggan Impulsif")
-st.caption("Upload data transaksi → filter tahun & umur → hasil interpretasi.")
+st.set_page_config(page_title="Dashboard Analisis Pola Belanja Impulsif Gen Z", layout="wide")
+st.title("Dashboard Analisis Pola Belanja Impulsif Gen Z")
+st.caption("Upload data transaksi → filter tahun & umur → hasil interpretasi (PrefixSpan & Isolation Forest).")
 
 @st.cache_data(show_spinner=False)
 def _load_and_prepare_csv(file_bytes: bytes):
@@ -173,23 +173,36 @@ with st.sidebar:
             st.error("File CSV kosong.")
             st.stop()
 
+        # Tahun transaksi (data-driven)
         if "order_year" in df_base.columns and df_base["order_year"].notna().any():
             yr = pd.to_numeric(df_base["order_year"], errors="coerce").dropna()
             year_min_data = int(yr.min()) if not yr.empty else 1900
             year_max_data = int(yr.max()) if not yr.empty else 2100
         else:
             year_min_data, year_max_data = 1900, 2100
-            st.warning("Kolom tanggal tidak kebaca")
+            st.warning("Kolom tanggal tidak kebaca (order_year kosong/invalid).")
 
         st.divider()
         st.subheader("Filter Tahun Transaksi")
         c_year1, c_year2 = st.columns(2)
         with c_year1:
-            year_start = st.number_input("Dari", min_value=year_min_data, max_value=year_max_data,
-                                         value=year_min_data, step=1, key="year_start")
+            year_start = st.number_input(
+                "Dari",
+                min_value=year_min_data,
+                max_value=year_max_data,
+                value=year_min_data,
+                step=1,
+                key="year_start",
+            )
         with c_year2:
-            year_end = st.number_input("Sampai", min_value=year_min_data, max_value=year_max_data,
-                                       value=year_max_data, step=1, key="year_end")
+            year_end = st.number_input(
+                "Sampai",
+                min_value=year_min_data,
+                max_value=year_max_data,
+                value=year_max_data,
+                step=1,
+                key="year_end",
+            )
 
         age_active_sidebar = "customer_age" in df_base.columns and df_base["customer_age"].notna().any()
         st.subheader("Filter Umur Pelanggan")
@@ -200,43 +213,81 @@ with st.sidebar:
 
             c_age1, c_age2 = st.columns(2)
             with c_age1:
-                age_min = st.number_input("Min", min_value=age_min_data, max_value=age_max_data,
-                                          value=age_min_data, step=1, key="age_min")
+                age_min = st.number_input(
+                    "Min",
+                    min_value=age_min_data,
+                    max_value=age_max_data,
+                    value=age_min_data,
+                    step=1,
+                    key="age_min",
+                )
             with c_age2:
-                age_max = st.number_input("Max", min_value=age_min_data, max_value=age_max_data,
-                                          value=age_max_data, step=1, key="age_max")
+                age_max = st.number_input(
+                    "Max",
+                    min_value=age_min_data,
+                    max_value=age_max_data,
+                    value=age_max_data,
+                    step=1,
+                    key="age_max",
+                )
         else:
-            st.info("Kolom umur tidak tersedia/valid → filter umur dimatikan.")
+            st.info("Kolom umur tidak tersedia/valid (customer_age). Filter umur tidak diterapkan.")
             age_min, age_max = None, None
 
         st.subheader("Minimum Panjang Sequence Pelanggan")
-        min_seq_len = st.number_input("Min sequence length", min_value=1, max_value=50, value=2, step=1, key="min_seq_len")
+        min_seq_len = st.number_input(
+            "Min sequence length",
+            min_value=1,
+            max_value=50,
+            value=2,
+            step=1,
+            key="min_seq_len",
+        )
 
         st.divider()
         st.subheader("Parameter Model")
-        n_estimators_ui = st.number_input("n_estimators (Isolation Forest)", min_value=50, max_value=1000,
-                                          value=N_ESTIMATORS, step=50, key="n_estimators")
-        contamination_ui = st.number_input("contamination (Isolation Forest)", min_value=0.001, max_value=0.5,
-                                           value=float(CONTAMINATION), step=0.001, format="%.3f", key="contamination")
-        min_support_ui = st.number_input("min_support_ratio (PrefixSpan)", min_value=0.001, max_value=0.5,
-                                         value=float(MIN_SUPPORT_RATIO), step=0.001, format="%.3f", key="min_support_ratio")
+        n_estimators_ui = st.number_input(
+            "n_estimators (Isolation Forest)",
+            min_value=50,
+            max_value=1000,
+            value=N_ESTIMATORS,
+            step=50,
+            key="n_estimators",
+        )
+        contamination_ui = st.number_input(
+            "contamination (Isolation Forest)",
+            min_value=0.001,
+            max_value=0.5,
+            value=float(CONTAMINATION),
+            step=0.001,
+            format="%.3f",
+            key="contamination",
+        )
+        min_support_ui = st.number_input(
+            "min_support_ratio (PrefixSpan)",
+            min_value=0.001,
+            max_value=0.5,
+            value=float(MIN_SUPPORT_RATIO),
+            step=0.001,
+            format="%.3f",
+            key="min_support_ratio",
+        )
 
-# stop kalau belum upload
+        st.divider()
+        show_normal = st.checkbox("Tampilkan pembanding pelanggan Normal (opsional)", value=False)
+
 if uploaded is None:
     st.stop()
-
-
-df = df_base.copy()
 
 if year_start > year_end:
     year_start, year_end = year_end, year_start
 if (age_min is not None) and (age_max is not None) and (age_min > age_max):
     age_min, age_max = age_max, age_min
 
-# Pipeline
 t_all0 = time.perf_counter()
 with st.spinner("Memproses data..."):
     df = df_base.copy()
+
     age_active = "customer_age" in df.columns and df["customer_age"].notna().any()
     age_min_use = int(age_min) if age_active else None
     age_max_use = int(age_max) if age_active else None
@@ -248,14 +299,16 @@ with st.spinner("Memproses data..."):
         year_end=int(year_end),
         age_min=age_min_use,
         age_max=age_max_use,
-        segment="Semua usia",)
+        segment="Semua usia",
+    )
     t1 = time.perf_counter()
     rt_filter = t1 - t0
 
     if df_filtered.empty:
-        st.error("Data kosong setelah filter tahun/umur")
+        st.error("Data kosong setelah filter tahun/umur.")
         st.stop()
 
+    # IF features
     t0 = time.perf_counter()
     order_tbl = build_order_table(df_filtered)
     cust_feat = build_customer_features(order_tbl)
@@ -264,20 +317,29 @@ with st.spinner("Memproses data..."):
         contamination=float(contamination_ui),
         n_estimators=int(n_estimators_ui),
         score_percentile=SCORE_PERCENTILE,
-        random_state=42,)
+        random_state=42,
+    )
     t1 = time.perf_counter()
     rt_if = t1 - t0
 
+    # Sequences + PrefixSpan
     t0 = time.perf_counter()
     seq_df = build_sequences(df_filtered, hasil_if, min_seq_len=int(min_seq_len))
     sequences_all = seq_df["sequence"].tolist()
-    info_all, pat_all = run_prefixspan(sequences_all, float(min_support_ui), min_len=MIN_PATTERN_LEN, max_len=MAX_PATTERN_LEN)
+    info_all, pat_all = run_prefixspan(
+        sequences_all,
+        float(min_support_ui),
+        min_len=MIN_PATTERN_LEN,
+        max_len=MAX_PATTERN_LEN,
+    )
 
     seq_labeled = seq_df.merge(
         hasil_if[["customer_id", "status", "anom_score"]],
         on="customer_id",
         how="left",
-        suffixes=("_seq", "_if"),)
+        suffixes=("_seq", "_if"),
+    )
+
     status_col = "status"
     if status_col not in seq_labeled.columns:
         for cand in ("status_if", "status_y"):
@@ -288,8 +350,23 @@ with st.spinner("Memproses data..."):
     normal_seqs = seq_labeled.loc[seq_labeled[status_col] == "Normal", "sequence"].tolist()
     imp_seqs    = seq_labeled.loc[seq_labeled[status_col] == "Impulsif", "sequence"].tolist()
 
-    info_n, pat_n = run_prefixspan(normal_seqs, float(min_support_ui), min_len=MIN_PATTERN_LEN, max_len=MAX_PATTERN_LEN) if len(normal_seqs) else ({"N_sequences": 0, "n_patterns": 0}, pd.DataFrame())
-    info_i, pat_i = run_prefixspan(imp_seqs, float(min_support_ui), min_len=MIN_PATTERN_LEN, max_len=MAX_PATTERN_LEN) if len(imp_seqs) else ({"N_sequences": 0, "n_patterns": 0}, pd.DataFrame())
+    info_i, pat_i = run_prefixspan(
+        imp_seqs,
+        float(min_support_ui),
+        min_len=MIN_PATTERN_LEN,
+        max_len=MAX_PATTERN_LEN,
+    ) if len(imp_seqs) else ({"N_sequences": 0, "n_patterns": 0}, pd.DataFrame())
+
+    if show_normal and len(normal_seqs):
+        info_n, pat_n = run_prefixspan(
+            normal_seqs,
+            float(min_support_ui),
+            min_len=MIN_PATTERN_LEN,
+            max_len=MAX_PATTERN_LEN,
+        )
+    else:
+        info_n, pat_n = ({"N_sequences": len(normal_seqs), "n_patterns": 0}, pd.DataFrame())
+
     t1 = time.perf_counter()
     rt_ps = t1 - t0
 
@@ -298,6 +375,7 @@ rt_total = t_all1 - t_all0
 
 cats = df_filtered["category"].astype(str).str.strip().unique().tolist()
 
+# Ringkasan 
 st.subheader("Ringkasan")
 
 c1, c2, c3, c4 = st.columns(4)
@@ -312,15 +390,16 @@ if age_active:
 else:
     st.info("Kolom umur tidak tersedia/valid, sehingga filter umur tidak diterapkan.")
 
-st.subheader("Pengaruh Diskon (Inti Temuan)")
+# Diskon 
+st.subheader("Pengaruh Diskon")
 disc = _discount_strength_label(hasil_if)
 st.dataframe(disc["table"], use_container_width=True, hide_index=True)
 for t in disc["text"]:
     st.write("- " + t)
 
+# Isolation Forest 
 st.subheader("Normal vs Impulsif (Isolation Forest)")
 
-# Ringkasan label
 if "status" in hasil_if.columns:
     n_total = int(hasil_if["customer_id"].nunique()) if "customer_id" in hasil_if.columns else len(hasil_if)
     n_imp = int((hasil_if["status"] == "Impulsif").sum())
@@ -328,15 +407,16 @@ if "status" in hasil_if.columns:
     st.write(
         f"**Impulsif** = customer dengan skor anomali di atas threshold (persentil **{SCORE_PERCENTILE}**). "
         f"**Normal** = customer lainnya. "
-        f"Hasil: **{n_imp} impulsif** dan **{n_norm} normal** dari **{n_total} customer**.")
+        f"Hasil: **{n_imp} impulsif** dan **{n_norm} normal** dari **{n_total} customer**."
+    )
 
-# Top impulsif (ringkas)
 imp_texts = interpret_iforest_topk(hasil_if, top_k=3)
 if imp_texts:
     st.markdown("**Interpretasi Top 3 pelanggan impulsif:**")
     for t in imp_texts:
         st.write("- " + _humanize_text(t, cats))
 
+# PrefixSpan: Fokus Impulsif 
 st.subheader("Pola Pembelian pada Pelanggan Impulsif (PrefixSpan)")
 
 insights_i = []
@@ -353,7 +433,6 @@ else:
     for t in insights_i:
         st.write("- " + _humanize_text(t, cats))
 
-    # Statistik trigger diskon: peluang "beli lagi"
     trig_i = _trigger_stats(imp_seqs, suffix="_D", top_k=3)
     if not trig_i.empty:
         trig_i_view = trig_i.copy()
@@ -361,11 +440,14 @@ else:
         trig_i_view["Next paling sering"] = trig_i_view["top_next"].apply(lambda x: _humanize_token(x) if isinstance(x,str) else "-")
         trig_i_view["P(beli lagi setelah trigger)"] = (trig_i_view["prob_buy_again"]*100).round(2).astype(str) + "%"
         trig_i_view["P(next = next top | beli lagi)"] = (trig_i_view["prob_top_next_given_next"]*100).round(2).astype(str) + "%"
-        st.markdown("**Diskon sebagai pemicu pembelian lanjutan (Impulsif):**")
-        st.dataframe(trig_i_view[["Trigger (Diskon)","occurrences","P(beli lagi setelah trigger)","Next paling sering","P(next = next top | beli lagi)"]],
-                     use_container_width=True, hide_index=True)
 
-        # 1 kalimat insight contoh (yang dosen suka)
+        st.markdown("**Diskon sebagai pemicu pembelian lanjutan (Impulsif):**")
+        st.dataframe(
+            trig_i_view[["Trigger (Diskon)","occurrences","P(beli lagi setelah trigger)","Next paling sering","P(next = next top | beli lagi)"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
         top_row = trig_i.iloc[0].to_dict()
         trigger = _humanize_token(top_row["trigger"])
         p_again = top_row["prob_buy_again"]*100
@@ -373,28 +455,70 @@ else:
             nxt = _humanize_token(top_row["top_next"])
             p_nxt = top_row["prob_top_next_given_next"]*100
             if disc["label"] == "kuat":
-                st.write(f"**Insight:** Jika pelanggan impulsif membeli **{trigger}**, maka sekitar **{p_again:.2f}%** kasus diikuti pembelian berikutnya. Pembelian berikutnya paling sering adalah **{nxt}** (~{p_nxt:.2f}%). Ini konsisten bahwa diskon berperan kuat sebagai pemicu pembelian lanjutan.")
+                st.write(
+                    f"**Insight:** Jika pelanggan impulsif membeli **{trigger}**, maka sekitar **{p_again:.2f}%** diikuti pembelian berikutnya. "
+                    f"Pembelian berikutnya paling sering **{nxt}** (~{p_nxt:.2f}%). Ini konsisten bahwa diskon berperan kuat sebagai pemicu pembelian lanjutan."
+                )
             else:
-                st.write(f"**Insight:** Jika pelanggan impulsif membeli **{trigger}**, maka sekitar **{p_again:.2f}%** kasus diikuti pembelian berikutnya. Selanjutnya yang paling sering adalah **{nxt}** (~{p_nxt:.2f}%). Diskon tetap berperan, namun efeknya relatif lebih kecil—strateginya bisa diperkuat lewat timing promo & rekomendasi berbasis urutan.")
+                st.write(
+                    f"**Insight:** Jika pelanggan impulsif membeli **{trigger}**, maka sekitar **{p_again:.2f}%** diikuti pembelian berikutnya. "
+                    f"Selanjutnya yang paling sering **{nxt}** (~{p_nxt:.2f}%). Diskon tetap berperan, namun efeknya relatif lebih kecil."
+                )
         else:
             st.write(f"Jika pelanggan impulsif membeli **{trigger}**, sekitar **{p_again:.2f}%** kasus diikuti pembelian berikutnya. (Next item spesifik tidak cukup dominan untuk dirangkum.)")
 
+#  Normal + Perbandingan (opsional) 
+insights_n = []
+cmp = {"text": [], "table": pd.DataFrame()}
+tbl = pd.DataFrame()
 
+if show_normal:
+    st.subheader("Pola Pembelian pada Pelanggan Normal (PrefixSpan)")
+
+    if pat_n is None or pat_n.empty:
+        st.info("Pola normal belum terbentuk")
+    else:
+        view_n = pat_n.head(10).copy()
+        view_n["pola"] = view_n["pattern_str"].apply(_humanize_pattern_str)
+        st.dataframe(view_n[["pola","support_count","support_ratio","length"]], use_container_width=True, hide_index=True)
+
+        insights_n, _ = interpret_prefixspan_topk(pat_n, normal_seqs, top_k=TOPK_PATTERNS)
+        st.markdown("**Interpretasi (Top 3 pola normal):**")
+        for t in insights_n:
+            st.write("- " + _humanize_text(t, cats))
+
+    st.subheader("Perbandingan Pola Normal vs Impulsif")
+    cmp = compare_patterns(pat_n, pat_i, top_k=TOPK_COMPARE)
+    for t in cmp.get("text", []):
+        st.write("- " + _humanize_text(t, cats))
+    tbl = cmp.get("table", pd.DataFrame())
+    if isinstance(tbl, pd.DataFrame) and not tbl.empty:
+        view = tbl.copy()
+        if "pattern_str" in view.columns:
+            view["pola"] = view["pattern_str"].apply(_humanize_pattern_str)
+        cols = ["pola","support_ratio_normal","support_ratio_imp","delta_support_ratio"]
+        cols = [c for c in cols if c in view.columns]
+        st.dataframe(view[cols].head(15), use_container_width=True, hide_index=True)
+
+# Rekomendasi 
 st.subheader("Rekomendasi")
 
 if disc["label"] == "kuat":
     st.write(
         "- **Diskon:** fokuskan promo pada kategori pemicu (token *_D* yang sering muncul di Impulsif), lalu follow-up dengan rekomendasi kategori next yang paling sering.\n"
         "- Terapkan **kupon lanjutan** setelah pembelian diskon untuk mendorong pembelian berikutnya sesuai pola.\n"
-        "- Gunakan segmentasi: pelanggan impulsif lebih responsif terhadap diskon → aktifkan notifikasi/promo lebih personal.")
+        "- Pelanggan impulsif lebih responsif terhadap diskon, aktifkan notifikasi/promo lebih personal."
+    )
 else:
     st.write(
-        "- **Diskon tetap berpengaruh, tapi lebih lemah**, diskon bisa dipakai sebagai pemicu awal, namun sebaiknya diperkuat dengan **rekomendasi berbasis urutan** (next item yang sering mengikuti) dan bundling.\n"
-        "- Strategi: diskon kecil (flash sale) + rekomendasi next-step untuk menaikkan peluang pembelian lanjutan.\n"
-        "- Jika pola tanpa diskon (token *_ND*) dominan pada Normal, dorong pembelian lanjutan lewat loyalty points, gratis ongkir, atau rekomendasi produk pelengkap.")
+        "- Diskon bisa dipakai sebagai pemicu awal, namun sebaiknya diperkuat dengan **rekomendasi berbasis urutan** (next item yang sering mengikuti) dan bundling.\n"
+        "- Uji strategi: diskon kecil (flash sale) + rekomendasi next-step untuk menaikkan peluang pembelian lanjutan.\n"
+        "- Jika pola tanpa diskon (token *_ND*) dominan pada Normal, dorong pembelian lanjutan lewat loyalty points, gratis ongkir, atau rekomendasi produk pelengkap."
+    )
 
 st.subheader("Download Output (CSV)")
 with st.expander("Download hasil pola & interpretasi"):
+    # Pola Impulsif
     if pat_i is None or pat_i.empty:
         df_pola_imp = pd.DataFrame(columns=["pola","pattern_str","support_count","support_ratio","length"])
     else:
@@ -402,59 +526,53 @@ with st.expander("Download hasil pola & interpretasi"):
         df_pola_imp["pola"] = df_pola_imp["pattern_str"].apply(_humanize_pattern_str)
         df_pola_imp = df_pola_imp[["pola","pattern_str","support_count","support_ratio","length"]]
 
-    if pat_n is None or pat_n.empty:
-        df_pola_norm = pd.DataFrame(columns=["pola","pattern_str","support_count","support_ratio","length"])
-    else:
+    # Pola Normal (opsional)
+    if show_normal and pat_n is not None and not pat_n.empty:
         df_pola_norm = pat_n.copy()
         df_pola_norm["pola"] = df_pola_norm["pattern_str"].apply(_humanize_pattern_str)
         df_pola_norm = df_pola_norm[["pola","pattern_str","support_count","support_ratio","length"]]
+    else:
+        df_pola_norm = pd.DataFrame(columns=["pola","pattern_str","support_count","support_ratio","length"])
 
-    df_pola_cmp = pd.DataFrame()
-    if isinstance(tbl, pd.DataFrame) and not tbl.empty:
+    # Perbandingan (opsional)
+    if show_normal and isinstance(tbl, pd.DataFrame) and not tbl.empty:
         df_pola_cmp = tbl.copy()
         if "pattern_str" in df_pola_cmp.columns:
             df_pola_cmp["pola"] = df_pola_cmp["pattern_str"].apply(_humanize_pattern_str)
         cols = ["pola","pattern_str","support_ratio_normal","support_ratio_imp","delta_support_ratio"]
         cols = [c for c in cols if c in df_pola_cmp.columns]
         df_pola_cmp = df_pola_cmp[cols]
+    else:
+        df_pola_cmp = pd.DataFrame(columns=["pola","pattern_str","support_ratio_normal","support_ratio_imp","delta_support_ratio"])
 
     interp_rows = []
     for i, t in enumerate(imp_texts or [], 1):
         interp_rows.append({"bagian": "Interpretasi IF (Top 3 impulsif)", "rank": i, "teks": _humanize_text(t, cats)})
     for i, t in enumerate(insights_i or [], 1):
         interp_rows.append({"bagian": "Interpretasi pola Impulsif (Top 3)", "rank": i, "teks": _humanize_text(t, cats)})
-    for i, t in enumerate(insights_n or [], 1):
-        interp_rows.append({"bagian": "Interpretasi pola Normal (Top 3)", "rank": i, "teks": _humanize_text(t, cats)})
-    for i, t in enumerate((cmp.get("text", []) if isinstance(cmp, dict) else []) or [], 1):
-        interp_rows.append({"bagian": "Perbandingan pola (ringkasan)", "rank": i, "teks": _humanize_text(t, cats)})
+    if show_normal:
+        for i, t in enumerate(insights_n or [], 1):
+            interp_rows.append({"bagian": "Interpretasi pola Normal (Top 3)", "rank": i, "teks": _humanize_text(t, cats)})
+        for i, t in enumerate((cmp.get("text", []) if isinstance(cmp, dict) else []) or [], 1):
+            interp_rows.append({"bagian": "Perbandingan pola (ringkasan)", "rank": i, "teks": _humanize_text(t, cats)})
     df_interpretasi = pd.DataFrame(interp_rows)
 
-    cdl1, cdl2, cdl3, cdl4 = st.columns(4)
-    with cdl1:
-        st.download_button(
-            "Pola Impulsif (CSV)",
-            data=_df_to_csv_bytes(df_pola_imp),
-            file_name="pola_impulsif.csv",
-            mime="text/csv",)
-    with cdl2:
-        st.download_button(
-            "Pola Normal (CSV)",
-            data=_df_to_csv_bytes(df_pola_norm),
-            file_name="pola_normal.csv",
-            mime="text/csv",)
-    with cdl3:
-        st.download_button(
-            "Perbandingan Pola (CSV)",
-            data=_df_to_csv_bytes(df_pola_cmp),
-            file_name="perbandingan_pola.csv",
-            mime="text/csv",)
-    with cdl4:
-        st.download_button(
-            "Interpretasi (CSV)",
-            data=_df_to_csv_bytes(df_interpretasi),
-            file_name="interpretasi_pola.csv",
-            mime="text/csv",)
-
+    if show_normal:
+        cdl1, cdl2, cdl3, cdl4 = st.columns(4)
+        with cdl1:
+            st.download_button("Pola Impulsif (CSV)", _df_to_csv_bytes(df_pola_imp), "pola_impulsif.csv", "text/csv")
+        with cdl2:
+            st.download_button("Pola Normal (CSV)", _df_to_csv_bytes(df_pola_norm), "pola_normal.csv", "text/csv")
+        with cdl3:
+            st.download_button("Perbandingan Pola (CSV)", _df_to_csv_bytes(df_pola_cmp), "perbandingan_pola.csv", "text/csv")
+        with cdl4:
+            st.download_button("Interpretasi (CSV)", _df_to_csv_bytes(df_interpretasi), "interpretasi_pola.csv", "text/csv")
+    else:
+        cdl1, cdl2 = st.columns(2)
+        with cdl1:
+            st.download_button("Pola Impulsif (CSV)", _df_to_csv_bytes(df_pola_imp), "pola_impulsif.csv", "text/csv")
+        with cdl2:
+            st.download_button("Interpretasi (CSV)", _df_to_csv_bytes(df_interpretasi), "interpretasi_pola.csv", "text/csv")
 
 with st.expander("Detail runtime (detik)"):
     st.write({
@@ -462,7 +580,8 @@ with st.expander("Detail runtime (detik)"):
         "apply_filters": round(rt_filter, 6),
         "isolation_forest": round(rt_if, 6),
         "prefixspan_total": round(rt_ps, 6),
-        "total": round(rt_total, 6),})
+        "total": round(rt_total, 6),
+    })
 
 with st.expander("Lihat tabel verifikasi (opsional)"):
     st.caption("Ini hanya untuk verifikasi/debug. Bisa disembunyikan saat presentasi.")
