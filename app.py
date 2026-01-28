@@ -379,37 +379,8 @@ else:
         else:
             st.write(f"Jika pelanggan impulsif membeli **{trigger}**, sekitar **{p_again:.2f}%** kasus diikuti pembelian berikutnya. (Next item spesifik tidak cukup dominan untuk dirangkum.)")
 
-st.subheader("Pola Pembelian pada Pelanggan Normal (PrefixSpan)")
 
-insights_n = []
-
-if pat_n is None or pat_n.empty:
-    st.info("Pola normal belum terbentuk")
-else:
-    view_n = pat_n.head(10).copy()
-    view_n["pola"] = view_n["pattern_str"].apply(_humanize_pattern_str)
-    st.dataframe(view_n[["pola","support_count","support_ratio","length"]], use_container_width=True, hide_index=True)
-
-    insights_n, _ = interpret_prefixspan_topk(pat_n, normal_seqs, top_k=TOPK_PATTERNS)
-    st.markdown("**Interpretasi (Top 3 pola normal):**")
-    for t in insights_n:
-        st.write("- " + _humanize_text(t, cats))
-
-st.subheader("Perbandingan Pola Normal vs Impulsif")
-
-cmp = compare_patterns(pat_n, pat_i, top_k=TOPK_COMPARE)
-for t in cmp.get("text", []):
-    st.write("- " + _humanize_text(t, cats))
-tbl = cmp.get("table", pd.DataFrame())
-if isinstance(tbl, pd.DataFrame) and not tbl.empty:
-    view = tbl.copy()
-    if "pattern_str" in view.columns:
-        view["pola"] = view["pattern_str"].apply(_humanize_pattern_str)
-        cols = ["pola","support_ratio_normal","support_ratio_imp","delta_support_ratio"]
-        cols = [c for c in cols if c in view.columns]
-        st.dataframe(view[cols].head(15), use_container_width=True, hide_index=True)
-
-st.subheader("Rekomendasi (Berbasis Diskon & Pola Urutan)")
+st.subheader("Rekomendasi")
 
 if disc["label"] == "kuat":
     st.write(
