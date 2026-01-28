@@ -1,6 +1,7 @@
+Link Streamlit: https://deploy-app-prefixspan-if.streamlit.app/
+
 # Dashboard Ringkas (Skripsi) — PrefixSpan + Isolation Forest
 
-Versi singkat 1 halaman:
 - Filter **tahun** & **umur** (input angka dari…sampai…)
 - Input **minimum panjang sequence customer**
 - Output langsung: **Interpretasi Impulsif**, **Pola Impulsif vs Normal**, **Pengaruh diskon (kuat/lemah)**, dan **runtime**
