@@ -7,23 +7,19 @@ from src.preprocess import (
     apply_filters,
     build_order_table,
     build_customer_features,
-    build_sequences,
-)
+    build_sequences,)
 from src.mining import run_prefixspan
 from src.anomaly import run_isolation_forest
 from src.interpret import (
     interpret_prefixspan_topk,
     interpret_iforest_topk,
-    compare_patterns,
-)
+    compare_patterns,)
 
 st.set_page_config(page_title="Dashboard PrefixSpan + Isolation Forest", layout="wide")
 
-st.title("Dashboard Analisis Pola Pembelian & Deteksi Pelanggan Impulsif")
+st.title("Dashboard Analisis Pola Pembelian Pada Pelanggan Impulsif")
 st.caption(
-    "Upload data transaksi → filter tahun & umur (opsional segmen Gen Z) → "
-    "PrefixSpan (pola sekuensial) & Isolation Forest (deteksi pelanggan impulsif + skor anomali)."
-)
+    "Upload data transaksi → filter tahun & umur → Isolation Forest & PrefixSpan")
 
 # Sidebar: Input 
 with st.sidebar:
