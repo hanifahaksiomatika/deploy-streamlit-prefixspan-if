@@ -131,8 +131,6 @@ def _order_discount_overview(order_tbl: pd.DataFrame, hasil_if: pd.DataFrame | N
         out["by_status"] = grp[["status", "Rasio order Diskon", "Rasio order Non-Diskon"]]
     return out
 
-
-
 def _trigger_stats(sequences: list[list[str]], suffix: str = "_D", top_k: int = 3):
     occ = Counter()
     occ_next = Counter()
@@ -261,15 +259,7 @@ with st.sidebar:
         else:
             st.info("Kolom umur tidak tersedia/valid (customer_age). Filter umur tidak diterapkan.")
             age_min, age_max = None, None
-
-        st.subheader("Minimum Panjang Sequence Pelanggan")
-        min_seq_len = st.number_input(
-            "Min sequence length",
-            min_value=1,
-            max_value=50,
-            value=2,
-            step=1,
-            key="min_seq_len",)
+        min_seq_len = 2
 
         st.divider()
         st.subheader("Parameter Model")
@@ -296,12 +286,12 @@ with st.sidebar:
             step=0.001,
             format="%.3f",
             key="min_support_ratio",)
-
         st.divider()
-        show_normal = st.checkbox("Tampilkan pembanding pelanggan Normal", value=False)
+        show_normal = st.checkbox("Tampilkan pembanding pelanggan Normal (opsional)", value=False)
 
 if uploaded is None:
     st.stop()
+
 
 if year_start > year_end:
     year_start, year_end = year_end, year_start
@@ -392,6 +382,7 @@ rt_total = t_all1 - t_all0
 
 cats = df_filtered["category"].astype(str).str.strip().unique().tolist()
 
+# Ringkasan 
 st.subheader("Ringkasan")
 
 c1, c2, c3, c4 = st.columns(4)
@@ -406,9 +397,9 @@ if age_active:
 else:
     st.info("Kolom umur tidak tersedia/valid, sehingga filter umur tidak diterapkan.")
 
+# Diskon 
 st.subheader("Diskon vs Non-Diskon")
 disc = _discount_profile_label(hasil_if)
-
 ov = _order_discount_overview(order_tbl, hasil_if)
 if isinstance(ov.get("overall"), pd.DataFrame) and not ov["overall"].empty:
     st.markdown("**Proporsi order:**")
@@ -418,6 +409,8 @@ if isinstance(ov.get("by_status"), pd.DataFrame) and not ov["by_status"].empty:
     st.markdown("**Proporsi order per status (Normal vs Impulsif):**")
     st.dataframe(ov["by_status"], use_container_width=True, hide_index=True)
 
+
+# Isolation Forest 
 st.subheader("Normal vs Impulsif")
 
 if "status" in hasil_if.columns:
@@ -435,12 +428,13 @@ if imp_texts:
     for t in imp_texts:
         st.write("- " + _humanize_text(t, cats))
 
+# PrefixSpan: Fokus Impulsif 
 st.subheader("Pola Pembelian pada Pelanggan Impulsif")
 
 insights_i = []
 
 if pat_i is None or pat_i.empty:
-    st.info("Pola impulsif belum terbentuk (sequence impulsif terlalu sedikit atau support terlalu ketat).")
+    st.info("Pola impulsif belum terbentuk")
 else:
     view_i = pat_i.head(10).copy()
     view_i["pola"] = view_i["pattern_str"].apply(_humanize_pattern_str)
@@ -516,13 +510,12 @@ with tab_nd:
             st.write(
                 f"**Insight:** Setelah pelanggan impulsif membeli **{trigger}**, sekitar **{p_again:.2f}%** kasus diikuti pembelian berikutnya. "
                 "(Next item spesifik belum cukup dominan untuk dirangkum.)")
-
 insights_n = []
 cmp = {"text": [], "table": pd.DataFrame()}
 tbl = pd.DataFrame()
 
 if show_normal:
-    st.subheader("Pola Pembelian pada Pelanggan Normal")
+    st.subheader("Pola Pembelian pada Pelanggan Normal (PrefixSpan)")
 
     if pat_n is None or pat_n.empty:
         st.info("Pola normal belum terbentuk")
@@ -550,17 +543,13 @@ if show_normal:
         st.dataframe(view[cols].head(15), use_container_width=True, hide_index=True)
 
 st.subheader("Rekomendasi")
-
 rec = []
-
 if disc.get("label") == "Diskon":
     rec.append("- **Diskon:** fokuskan diskon atau promo pada kategori pemicu (token) yang sering muncul di pelanggan **Impulsif**, lalu follow-up dengan rekomendasi kategori **next** yang paling sering.")
     rec.append("- Terapkan **voucher/kupon lanjutan** setelah transaksi Diskon untuk mendorong pembelian berikutnya sesuai urutan yang terdeteksi.")
 else:
     rec.append("- **Diskon:** di data setelah filter tidak terdeteksi transaksi Diskon (semua Non-Diskon), jadi strategi Diskon tidak bisa dievaluasi dari dataset ini.")
-
 rec.append("- **Non-Diskon:** kalau pola Non-Diskon dominan, dorong pembelian lanjutan lewat loyalty points, gratis ongkir, bundling, atau rekomendasi produk pelengkap.")
-
 st.write("\n".join(rec))
 
 st.subheader("Download Output (CSV)")
@@ -571,14 +560,14 @@ with st.expander("Download hasil pola & interpretasi"):
         df_pola_imp = pat_i.copy()
         df_pola_imp["pola"] = df_pola_imp["pattern_str"].apply(_humanize_pattern_str)
         df_pola_imp = df_pola_imp[["pola","pattern_str","support_count","support_ratio","length"]]
-    
+
     if show_normal and pat_n is not None and not pat_n.empty:
         df_pola_norm = pat_n.copy()
         df_pola_norm["pola"] = df_pola_norm["pattern_str"].apply(_humanize_pattern_str)
         df_pola_norm = df_pola_norm[["pola","pattern_str","support_count","support_ratio","length"]]
     else:
         df_pola_norm = pd.DataFrame(columns=["pola","pattern_str","support_count","support_ratio","length"])
-    
+
     if show_normal and isinstance(tbl, pd.DataFrame) and not tbl.empty:
         df_pola_cmp = tbl.copy()
         if "pattern_str" in df_pola_cmp.columns:
@@ -617,4 +606,3 @@ with st.expander("Download hasil pola & interpretasi"):
             st.download_button("Pola Impulsif (CSV)", _df_to_csv_bytes(df_pola_imp), "pola_impulsif.csv", "text/csv")
         with cdl2:
             st.download_button("Interpretasi (CSV)", _df_to_csv_bytes(df_interpretasi), "interpretasi_pola.csv", "text/csv")
-            
