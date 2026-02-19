@@ -2,11 +2,9 @@ Link Streamlit: https://deploy-app-prefixspan-if.streamlit.app/
 
 # Dashboard Ringkas (Skripsi) — PrefixSpan + Isolation Forest
 
-- Filter **tahun** & **umur** (input angka dari…sampai…)
+- Filter **tahun** & **umur**
 - Input **minimum panjang sequence customer**
-- Output langsung: **Interpretasi Impulsif**, **Pola Impulsif vs Normal**, **Diskon vs Non-Diskon**, dan **runtime**
-
-Parameter model dan mining dikunci (auto) agar konsisten dengan notebook riset.
+- Output: **Interpretasi Impulsif**, **Pola Impulsif vs Normal**, **Diskon vs Non-Diskon**, dan **runtime**
 
 ## Run (Anaconda)
 ```bash
